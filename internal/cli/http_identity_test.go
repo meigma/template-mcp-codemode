@@ -65,14 +65,12 @@ func TestHTTPAuthorizationUsesEachVerifiedIdentity(t *testing.T) {
 		{name: "alice remains authorized", session: alice},
 		{name: "alice session does not authorize bob", session: bob, denied: true},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			result, callErr := tc.session.CallTool(context.Background(), &mcp.CallToolParams{
-				Meta:      mcp.Meta{"subject": map[string]any{"id": "alice"}, "subject_id": "alice"},
-				Name:      "execute",
-				Arguments: map[string]any{"source": "def main():\n    return random.int(min=7, max=7)"},
-			})
-			require.NoError(t, callErr)
-			assert.Equal(t, tc.denied, result.IsError, "authorization must use the verified request identity")
+		result, callErr := tc.session.CallTool(context.Background(), &mcp.CallToolParams{
+			Meta:      mcp.Meta{"subject": map[string]any{"id": "alice"}, "subject_id": "alice"},
+			Name:      "execute",
+			Arguments: map[string]any{"source": "def main():\n    return random.int(min=7, max=7)"},
 		})
+		require.NoError(t, callErr, tc.name)
+		assert.Equal(t, tc.denied, result.IsError, tc.name)
 	}
 }

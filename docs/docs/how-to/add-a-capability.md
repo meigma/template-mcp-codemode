@@ -130,7 +130,7 @@ Add and verify at least one real capability first. Then:
 
 1. Delete `internal/mcpserver/randomint.go` and its behavior tests.
 2. Remove `registerRandomInt(builder, options.Deps)` from `internal/mcpserver.New`.
-3. Update catalog expectations and documentation to describe the real capabilities.
+3. Update catalog expectations, documentation, and `.github/scripts/mcp_smoke.py` to exercise your replacement capabilities. The shipped smoke script assumes the demo's `min`/`max` arguments and `value` result; changing only its `--capability` flag is not enough when the contract changes. Both `moon run root:smoke` and the release workflows use this script.
 4. Use a client to search, describe, and execute a replacement capability over every retained transport.
 
 Keep the CodeMode builder, `mcpserver.Options.Runtime`, resolver wiring, and worker entry points. Removing the demo does not turn replacement capabilities into direct MCP tools.

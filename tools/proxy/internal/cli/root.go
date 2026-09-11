@@ -123,8 +123,8 @@ func newRootCommand(options Options, launch launchFunc) *cobra.Command {
 		Long: "Hot-reloading development proxy for MCP servers.\n\n" +
 			"The client connects to the proxy once and keeps that session for the\n" +
 			"whole dev loop. The proxy watches the source tree, rebuilds the server\n" +
-			"on change, swaps the child process, and re-advertises its tools via\n" +
-			"tools/list_changed — no reconnect.\n\n" +
+			"on change, and swaps the child process without reconnecting. It sends\n" +
+			"tools/list_changed only when the public MCP tool definitions change.\n\n" +
 			"The child command after \"--\" is re-run for every reload cycle with\n" +
 			"{{artifact}} replaced by that cycle's freshly built binary.",
 		Example: "  " + appName + " \\\n" +

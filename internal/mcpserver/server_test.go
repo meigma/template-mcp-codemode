@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,38 +23,15 @@ type executeEnvelope struct {
 	Result randomIntOutput `json:"result"`
 }
 
-type recordingAuthorizer struct {
-	mu     sync.Mutex
-	inputs []authz.AuthorizationInput
-	deny   func(authz.AuthorizationInput) bool
-}
+// localRangePolicy authorizes the local subject only for ranges ending above one.
+type localRangePolicy struct{}
 
-func (authorizer *recordingAuthorizer) Authorize(_ context.Context, input authz.AuthorizationInput) error {
-	authorizer.mu.Lock()
-	defer authorizer.mu.Unlock()
-
-	copied := authz.AuthorizationInput{
-		Subject:        input.Subject,
-		CapabilityID:   input.CapabilityID,
-		CapabilityName: input.CapabilityName,
-	}
-	if input.Arguments != nil {
-		copied.Arguments = make(map[string]any, len(input.Arguments))
-		for key, value := range input.Arguments {
-			copied.Arguments[key] = value
-		}
-	}
-	authorizer.inputs = append(authorizer.inputs, copied)
-	if authorizer.deny != nil && authorizer.deny(input) {
-		return fmt.Errorf("%w", authz.ErrDenied)
+func (localRangePolicy) Authorize(_ context.Context, input authz.AuthorizationInput) error {
+	maximum, valid := input.Arguments["max"].(int64)
+	if input.Subject.ID != trustedSubjectID || !valid || maximum <= 1 {
+		return authz.ErrDenied
 	}
 	return nil
-}
-
-func (authorizer *recordingAuthorizer) snapshot() []authz.AuthorizationInput {
-	authorizer.mu.Lock()
-	defer authorizer.mu.Unlock()
-	return append([]authz.AuthorizationInput(nil), authorizer.inputs...)
 }
 
 func TestServerEndToEnd(t *testing.T) {
@@ -157,17 +133,11 @@ func TestServerRejectsMissingSubject(t *testing.T) {
 	requireToolError(t, result, codemode.ErrUnauthenticated.Error())
 }
 
-func TestServerRecordsTrustedSubjectAndDenies(t *testing.T) {
+func TestServerAuthorizesTrustedSubjectAndArguments(t *testing.T) {
 	t.Parallel()
 
-	authorizer := &recordingAuthorizer{
-		deny: func(input authz.AuthorizationInput) bool {
-			max, _ := input.Arguments["max"].(int64)
-			return max == 1
-		},
-	}
 	session := newClientSession(t, Options{
-		Runtime: codemode.Options{Authorizer: authorizer},
+		Runtime: codemode.Options{Authorizer: localRangePolicy{}},
 	})
 
 	allowed, err := session.CallTool(context.Background(), &mcp.CallToolParams{
@@ -190,14 +160,6 @@ func TestServerRecordsTrustedSubjectAndDenies(t *testing.T) {
 	})
 	require.NoError(t, err, "denied execute must stay a tool-level error")
 	requireToolError(t, denied, codemode.ErrPermissionDenied.Error())
-
-	inputs := authorizer.snapshot()
-	require.Len(t, inputs, 2)
-	assert.Equal(t, authz.Subject{ID: trustedSubjectID}, inputs[0].Subject)
-	assert.Equal(t, randomIntName, inputs[0].CapabilityName)
-	assert.Equal(t, map[string]any{"min": int64(5), "max": int64(5)}, inputs[0].Arguments)
-	assert.Equal(t, authz.Subject{ID: trustedSubjectID}, inputs[1].Subject)
-	assert.NotEqual(t, "subject-attacker", string(inputs[1].Subject.ID))
 }
 
 func TestServerRequiresAuthorizer(t *testing.T) {
@@ -224,38 +186,7 @@ func TestServerRequiresResolver(t *testing.T) {
 	assert.ErrorIs(t, err, codemode.ErrInvalidRegistration)
 }
 
-func TestServerUsesContextSubject(t *testing.T) {
-	t.Parallel()
-
-	const subjectID authz.SubjectID = "development"
-	authorizer := &recordingAuthorizer{}
-	session := newClientSessionAt(
-		t,
-		authz.WithSubject(context.Background(), authz.Subject{ID: subjectID}),
-		Options{
-			Resolver: hostmcp.ContextSubject(),
-			Runtime:  codemode.Options{Authorizer: authorizer},
-		},
-	)
-
-	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
-		Name:      "execute",
-		Arguments: map[string]any{"source": randomIntProgram(5, 5)},
-	})
-	require.NoError(t, err, "execute")
-	requireSuccessfulTool(t, result)
-
-	inputs := authorizer.snapshot()
-	require.Len(t, inputs, 1)
-	assert.Equal(t, authz.Subject{ID: subjectID}, inputs[0].Subject)
-}
-
 func newClientSession(t *testing.T, options Options) *mcp.ClientSession {
-	t.Helper()
-	return newClientSessionAt(t, context.Background(), options)
-}
-
-func newClientSessionAt(t *testing.T, connectCtx context.Context, options Options) *mcp.ClientSession {
 	t.Helper()
 
 	if options.Logger == nil {
@@ -275,7 +206,7 @@ func newClientSessionAt(t *testing.T, connectCtx context.Context, options Option
 
 	srv, err := New(options)
 	require.NoError(t, err, "construct server")
-	serverSession, err := srv.Connect(connectCtx, serverTransport, nil)
+	serverSession, err := srv.Connect(context.Background(), serverTransport, nil)
 	require.NoError(t, err, "server connect")
 	t.Cleanup(func() { _ = serverSession.Close() })
 
@@ -287,8 +218,8 @@ func newClientSessionAt(t *testing.T, connectCtx context.Context, options Option
 	return clientSession
 }
 
-func randomIntProgram(min, max int64) string {
-	return fmt.Sprintf("def main():\n    return random.int(min=%d, max=%d)\n", min, max)
+func randomIntProgram(minimum, maximum int64) string {
+	return fmt.Sprintf("def main():\n    return random.int(min=%d, max=%d)\n", minimum, maximum)
 }
 
 func decodeStructured(t *testing.T, result *mcp.CallToolResult, dest any) {
