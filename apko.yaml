@@ -1,0 +1,50 @@
+# Minimal, multi-arch, nonroot runtime image assembled from the locally-built
+# template-mcp apk (melange.yaml) plus the Wolfi base packages. Mirrors the former
+# gcr.io/distroless/static-debian12:nonroot posture (uid 65532, ca-certs, tzdata,
+# no shell). The Wolfi base intentionally floats to the latest (fresh CA
+# bundle/timezones, low CVE surface); the exact resolved versions are recorded in
+# the per-build SBOM + provenance attestation rather than pinned in a lockfile.
+contents:
+  repositories:
+    - https://packages.wolfi.dev/os
+    - "@local ./packages"
+  keyring:
+    - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    # Per-arch ephemeral melange public keys are appended at build/publish time via
+    # --keyring-append (filenames differ per arch; never committed).
+  packages:
+    - wolfi-baselayout
+    - ca-certificates-bundle
+    - tzdata
+    - template-mcp@local
+
+# Containers are the networked deployment, so the image defaults to the http
+# transport bound to all interfaces. `--insecure` is required because the server
+# refuses to bind a non-loopback address without authentication; drop it and supply
+# real authorization before deploying. Override the args (e.g. `docker run ... stdio`)
+# or the whole command at runtime.
+entrypoint:
+  command: /usr/bin/template-mcp
+cmd: http --addr 0.0.0.0:8080 --insecure
+
+# Create the nonroot user/group (uid/gid 65532) and run as it — Wolfi has no
+# `nonroot` package; the user is defined here, mirroring distroless:nonroot.
+accounts:
+  groups:
+    - groupname: nonroot
+      gid: 65532
+  users:
+    - username: nonroot
+      uid: 65532
+      gid: 65532
+  run-as: 65532
+
+archs:
+  - amd64
+  - arm64
+
+annotations:
+  org.opencontainers.image.title: template-mcp
+  org.opencontainers.image.description: Meigma Go MCP server template
+  org.opencontainers.image.source: https://github.com/meigma/template-mcp
+  org.opencontainers.image.version: "0.1.4" # x-release-please-version

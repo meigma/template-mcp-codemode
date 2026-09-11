@@ -1,0 +1,452 @@
+# This workflow is tag-triggered by Release Please. It publishes binary release
+# assets with GoReleaser, builds the container image with melange (signed apk) +
+# apko (minimal multi-arch image), signs the image with keyless cosign, attests
+# both artifact classes through GitHub-native attestations, and leaves draft
+# publication as a human decision after inspection.
+
+name: Release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to release
+        required: true
+        type: string
+
+permissions: {}
+
+env:
+  IMAGE_NAME: ghcr.io/meigma/template-mcp
+
+jobs:
+  resolve-release:
+    name: Resolve Release
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.release-tag.outputs.tag }}
+      version: ${{ steps.release-tag.outputs.version }}
+    steps:
+      - name: Resolve release tag
+        id: release-tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then
+            tag="$DISPATCH_TAG"
+          else
+            tag="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "Release tag must match vX.Y.Z or vX.Y.Z-prerelease: $tag" >&2
+            exit 1
+          fi
+
+          version="${tag#v}"
+
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release-tag.outputs.tag }}
+        run: |
+          for attempt in $(seq 1 30); do
+            if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+              exit 0
+            fi
+            echo "Draft release $RELEASE_TAG is not ready yet; retrying..."
+            sleep 10
+          done
+
+          echo "Draft release $RELEASE_TAG was not found or is not a draft." >&2
+          exit 1
+
+  binary-release-assets:
+    name: Binary Release Assets
+    runs-on: ubuntu-24.04
+    needs:
+      - resolve-release
+    permissions:
+      contents: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out requested tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: git checkout --detach "$RELEASE_TAG"
+
+      - name: Set up Go
+        uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Run GoReleaser without publishing
+        uses: goreleaser/goreleaser-action@5daf1e915a5f0af01ddbcd89a43b8061ff4f1a89 # v7.2.2
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean --skip=publish
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
+        with:
+          version: "0.11.0"
+
+      - name: Stage and validate ghd release assets
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: uv run .github/scripts/stage_ghd_release_assets.py --tag "$RELEASE_TAG"
+
+      - name: Smoke test release binary
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          version="${RELEASE_TAG#v}"
+          binary_name="template-mcp"
+          host_os="$(go env GOHOSTOS)"
+          host_arch="$(go env GOHOSTARCH)"
+          bin="dist/release-assets/${binary_name}_${version}_${host_os}_${host_arch}"
+
+          if [ ! -x "$bin" ]; then
+            echo "failed to locate executable host binary artifact $bin" >&2
+            find dist/release-assets -maxdepth 1 -type f -print | sort >&2
+            exit 1
+          fi
+
+          output="$("$bin" --version)"
+          printf '%s\n' "$output"
+
+          case "$output" in
+            "$binary_name "*"$version"*) ;;
+            *) echo "unexpected version output: $output" >&2; exit 1 ;;
+          esac
+
+      - name: Upload assets to draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: gh release upload "$RELEASE_TAG" dist/release-assets/* --clobber
+
+      - name: Upload checksums for isolated attestation
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-checksums
+          path: dist/release-assets/checksums.txt
+          if-no-files-found: error
+          retention-days: 1
+
+  # Generate binary provenance in an ISOLATED reusable workflow (SLSA L3): the
+  # signing OIDC token is minted in attest.yml, unreachable by the build steps.
+  attest-binaries:
+    needs:
+      - binary-release-assets
+    permissions:
+      id-token: write
+      attestations: write
+      contents: read
+      # attest.yml is shared with attest-image, whose attest job declares
+      # packages: write for the image attestation's push-to-registry. A reusable
+      # workflow cannot request more permissions than its caller grants, so this
+      # caller must also grant packages even though the binary attestation never
+      # pushes to a registry (unused here, but required to satisfy the shared job).
+      packages: write
+    uses: ./.github/workflows/attest.yml
+    with:
+      checksums-artifact: release-checksums
+
+  # Build the per-arch signed apk on a native runner (no QEMU). Each runner mints
+  # its own ephemeral melange key (distinct filename) and uploads its apk plus its
+  # PUBLIC key; the private key never leaves the runner.
+  melange-build:
+    name: Melange Build (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs:
+      - resolve-release
+      - binary-release-assets
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+            apkdir: x86_64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            apkdir: aarch64
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out requested tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: git checkout --detach "$RELEASE_TAG"
+
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.6.14
+          cache: true
+
+      - name: Resolve build metadata
+        id: meta
+        env:
+          RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+        run: |
+          set -euo pipefail
+          echo "version=${RELEASE_VERSION}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "date=$(git show -s --format=%cI HEAD)" >> "$GITHUB_OUTPUT"
+
+      - name: Write melange vars file
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+          COMMIT: ${{ steps.meta.outputs.commit }}
+          DATE: ${{ steps.meta.outputs.date }}
+        run: |
+          printf 'version: "%s"\ncommit: "%s"\ndate: "%s"\n' "$VERSION" "$COMMIT" "$DATE" > melange-vars.yaml
+
+      - name: Generate ephemeral signing key
+        run: melange keygen "melange-${{ matrix.arch }}.rsa"
+
+      - name: Build signed apk
+        run: |
+          melange build melange.yaml \
+            --arch ${{ matrix.arch }} \
+            --runner docker \
+            --signing-key "melange-${{ matrix.arch }}.rsa" \
+            --source-dir . \
+            --vars-file melange-vars.yaml
+
+      - name: Upload apk and public key
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: apk-${{ matrix.arch }}
+          path: |
+            packages/${{ matrix.apkdir }}/**
+            melange-${{ matrix.arch }}.rsa.pub
+          if-no-files-found: error
+          retention-days: 1
+
+  container-image-release:
+    name: Container Image Release
+    runs-on: ubuntu-24.04
+    needs:
+      - resolve-release
+      - binary-release-assets
+      - melange-build
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    outputs:
+      image-name: ${{ steps.publish.outputs.name }}
+      image-digest: ${{ steps.publish.outputs.digest }}
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Check out requested tag
+        if: ${{ github.event_name == 'workflow_dispatch' }}
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: git checkout --detach "$RELEASE_TAG"
+
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.6.14
+          cache: true
+
+      - name: Install Syft
+        uses: anchore/sbom-action/download-syft@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+
+      - name: Download per-arch apks and public keys
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: apk-*
+          path: .
+          merge-multiple: true
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Publish multi-arch image
+        id: publish
+        env:
+          IMAGE_TAG: ${{ env.IMAGE_NAME }}:${{ needs.resolve-release.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          # apko --sbom-path moves the generated SBOMs into this directory, which
+          # must already exist (apko does not create it).
+          mkdir -p sbom
+
+          apko publish apko.yaml "$IMAGE_TAG" \
+            --arch amd64,arm64 \
+            --keyring-append ./melange-amd64.rsa.pub \
+            --keyring-append ./melange-arm64.rsa.pub \
+            --sbom-path ./sbom \
+            | tee apko-out.txt
+
+          digest="$(grep -oE 'sha256:[0-9a-f]{64}' apko-out.txt | tail -n1)"
+          if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+            echo "failed to parse published image digest from apko output" >&2
+            exit 1
+          fi
+
+          echo "name=${IMAGE_NAME}" >> "$GITHUB_OUTPUT"
+          echo "digest=${digest}" >> "$GITHUB_OUTPUT"
+          echo "tag=${IMAGE_TAG}" >> "$GITHUB_OUTPUT"
+          echo "ref=${IMAGE_NAME}@${digest}" >> "$GITHUB_OUTPUT"
+
+      - name: Verify multi-arch manifest
+        env:
+          IMAGE_TAG: ${{ steps.publish.outputs.tag }}
+        run: |
+          set -euo pipefail
+
+          manifest_json="$(docker buildx imagetools inspect "$IMAGE_TAG" --format '{{json .}}')"
+          platforms="$(jq -r '
+            [
+              .manifest.manifests[]
+              | select(.platform.os == "linux" and (.platform.architecture == "amd64" or .platform.architecture == "arm64"))
+              | "\(.platform.os)/\(.platform.architecture)"
+            ]
+            | unique
+            | join(",")
+          ' <<< "$manifest_json")"
+
+          if [ "$platforms" != "linux/amd64,linux/arm64" ]; then
+            echo "unexpected manifest platforms: $platforms" >&2
+            exit 1
+          fi
+
+      - name: Smoke test release image
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: |
+          set -euo pipefail
+
+          docker run --rm "$IMAGE_REF" --version
+          docker run --rm "$IMAGE_REF" --help
+
+      - name: Sign image (keyless, Sigstore/Fulcio via OIDC)
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: cosign sign --yes "$IMAGE_REF"
+
+      - name: Generate image SBOM (Go module granularity)
+        env:
+          IMAGE_REF: ${{ steps.publish.outputs.ref }}
+        run: syft "$IMAGE_REF" -o spdx-json=image.spdx.json
+
+      - name: Attest container image SBOM
+        uses: actions/attest-sbom@c604332985a26aa8cf1bdc465b92731239ec6b9e # v4.1.0
+        with:
+          subject-name: ${{ steps.publish.outputs.name }}
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: image.spdx.json
+          push-to-registry: true
+
+  # Generate container provenance in the ISOLATED reusable workflow (SLSA L3).
+  # apko has no BuildKit provenance, so attest.yml generates it explicitly with the
+  # signing key isolated from this build job (replaces the former in-job
+  # attest-build-provenance / Dockerfile-buildx `provenance: mode=max`).
+  attest-image:
+    needs:
+      - container-image-release
+    permissions:
+      id-token: write
+      attestations: write
+      packages: write
+      contents: read
+    uses: ./.github/workflows/attest.yml
+    with:
+      subject-name: ${{ needs.container-image-release.outputs.image-name }}
+      subject-digest: ${{ needs.container-image-release.outputs.image-digest }}
+      push-to-registry: true
+
+  release-inspection-summary:
+    name: Release Inspection Summary
+    runs-on: ubuntu-24.04
+    needs:
+      - resolve-release
+      - binary-release-assets
+      - container-image-release
+      - attest-binaries
+      - attest-image
+    permissions: {}
+    steps:
+      - name: Write inspection summary
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+          RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
+          IMAGE_NAME: ${{ needs.container-image-release.outputs.image-name }}
+          IMAGE_DIGEST: ${{ needs.container-image-release.outputs.image-digest }}
+        run: |
+          {
+            echo "## Draft release ready for inspection"
+            echo
+            echo "Release: $RELEASE_TAG"
+            echo
+            echo "Binary verification commands:"
+            echo
+            echo '```sh'
+            echo "gh release view $RELEASE_TAG --repo $GITHUB_REPOSITORY --json isDraft,assets"
+            echo "asset=\"template-mcp_${RELEASE_VERSION}_\$(go env GOOS)_\$(go env GOARCH)\""
+            echo "gh attestation verify \"dist/release-assets/\${asset}\" --repo \"$GITHUB_REPOSITORY\" --signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/attest.yml\" --source-ref \"refs/tags/$RELEASE_TAG\" --deny-self-hosted-runners"
+            echo "ghd download \"$GITHUB_REPOSITORY/template-mcp@${RELEASE_VERSION}\" --output \"\$(mktemp -d)\""
+            echo '```'
+            echo
+            echo "Container verification commands:"
+            echo
+            echo '```sh'
+            echo "docker login ghcr.io"
+            echo "docker pull \"${IMAGE_NAME}:${RELEASE_TAG}\""
+            echo "docker run --rm \"${IMAGE_NAME}:${RELEASE_TAG}\" --version"
+            echo "gh attestation verify \"oci://${IMAGE_NAME}@${IMAGE_DIGEST}\" --repo \"$GITHUB_REPOSITORY\" --signer-workflow \"$GITHUB_REPOSITORY/.github/workflows/attest.yml\" --source-ref \"refs/tags/$RELEASE_TAG\" --deny-self-hosted-runners"
+            echo "cosign verify \"${IMAGE_NAME}@${IMAGE_DIGEST}\" --certificate-identity-regexp \"^https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@.*\" --certificate-oidc-issuer https://token.actions.githubusercontent.com"
+            echo '```'
+            echo
+            echo "Publish or reject the draft release manually after inspection. The container image is already available at ${IMAGE_NAME}:${RELEASE_TAG} because GHCR does not have a draft release state."
+          } >> "$GITHUB_STEP_SUMMARY"

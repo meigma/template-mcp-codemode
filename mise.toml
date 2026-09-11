@@ -1,0 +1,74 @@
+# mise: tool + environment management for template-mcp.
+#
+# mise REPLACES Proto (the former .prototools + .moon/proto/*). The committed
+# mise.lock records per-platform download URLs + checksums; for aqua-backed tools
+# it additionally carries cosign / SLSA / GitHub-attestation verification.
+# `settings.locked` makes `mise install` FAIL CLOSED when a tool lacks a
+# pre-resolved URL for the current platform.
+#
+# moon stays the task runner / CI gate; it is configured (.moon/toolchains.yml +
+# moon.yml `toolchains.default: system`) to run these tools as `system` binaries
+# that mise puts on PATH.
+#
+# Bump a tool: edit its version here, then
+#   mise lock --platform linux-x64,linux-arm64,macos-x64,macos-arm64
+# and commit mise.toml + mise.lock together.
+
+[tools]
+# Language runtimes (core backend).
+go = "1.26.4"
+python = "3.14.3"
+
+# Go dev-tool CLIs. Explicit `aqua:` refs force the VERIFYING backend (checksum +
+# cosign/SLSA/GitHub-attestation recorded in mise.lock); they must never fall back
+# to a version-only backend (asdf/npm/cargo/pipx), which records no checksum.
+# mockery generates the dev proxy's testify mocks; it was formerly pinned via the
+# `tool` directive in tools/proxy/go.mod and is now mise-managed for fleet
+# uniformity (single version source + mise.lock attestation).
+"aqua:golangci/golangci-lint" = "2.12.2"
+"aqua:vektra/mockery"         = "3.7.0"
+
+# Docs (MkDocs) toolchain — moved off moon's former unstable_python/unstable_uv.
+"aqua:astral-sh/uv" = "0.11.0"
+
+# Build / CI / release / supply-chain CLIs. moon itself is now mise-managed (CI
+# installs it via mise instead of moonrepo/setup-toolchain). melange/apko/cosign
+# are consumed by the container build + image signing in the release workflow.
+"aqua:moonrepo/moon"          = "2.3.5"
+"aqua:chainguard-dev/melange" = "0.54.0"
+"aqua:chainguard-dev/apko"    = "1.2.19"
+"aqua:sigstore/cosign"        = "3.1.1"
+
+[env]
+# Pin the Go toolchain: never auto-download a toolchain other than the one above.
+# The version here is authoritative and matches go.mod's `go 1.26.4`.
+GOTOOLCHAIN = "local"
+
+# Local container image. CI builds the release image via the melange/apko jobs in
+# .github/workflows/release.yml; this task is the local equivalent. melange needs
+# Linux, so `--runner docker` makes `image-local` work on macOS too (Docker Desktop
+# runs the Linux build container).
+[tasks.image-local]
+description = "Build the apko image for the host arch and load it into Docker as template-mcp:dev"
+run = '''
+set -euo pipefail
+arch="$(go env GOARCH)"
+rm -rf packages image.tar
+melange keygen melange.rsa
+printf 'version: "dev"\ncommit: "%s"\ndate: "%s"\n' \
+  "$(git rev-parse --short HEAD 2>/dev/null || echo none)" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .melange-vars.local.yaml
+melange build melange.yaml --arch "$arch" --signing-key melange.rsa --runner docker \
+  --source-dir . --vars-file .melange-vars.local.yaml
+apko build apko.yaml template-mcp:dev image.tar --arch "$arch" --keyring-append ./melange.rsa.pub
+docker load < image.tar
+docker tag "template-mcp:dev-$arch" template-mcp:dev
+echo "loaded template-mcp:dev (host arch $arch)"
+'''
+
+[settings]
+# Read/write mise.lock, and fail closed if a tool lacks a pre-resolved URL for the
+# current platform — replaces Proto's `checksum-url` pins and extends integrity
+# enforcement to every tool.
+lockfile = true
+locked = true

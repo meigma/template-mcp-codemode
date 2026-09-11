@@ -1,0 +1,44 @@
+# Mockery config for the dev proxy's port mocks (internal/reloader).
+#
+# Mockery is provisioned by mise (mise.toml + mise.lock at the repo root), so the
+# version is pinned and integrity-verified fleet-wide. Regenerate the committed
+# mocks from the repo root with:
+#
+#   moon run proxy:mockery
+#
+# or directly from tools/proxy with the mise-managed binary:
+#
+#   mockery
+#
+# Mocks are generated in-package as mocks_test.go: the repo intentionally uses
+# whitebox tests (testpackage is disabled in the root .golangci.yml), and
+# test-only mocks keep the testify/mockery dependency out of production builds.
+all: false
+dir: '{{.InterfaceDir}}'
+filename: mocks_test.go
+force-file-write: true
+formatter: goimports
+formatter-options:
+  goimports:
+    all-errors: false
+    comments: true
+    format-only: true
+    fragment: false
+    local-prefix: github.com/meigma/template-mcp
+    tab-indent: true
+    tab-width: 8
+generate: true
+include-auto-generated: false
+log-level: info
+structname: '{{.Mock}}{{.InterfaceName}}'
+pkgname: '{{.SrcPackageName}}'
+recursive: false
+require-template-schema-exists: true
+template: testify
+template-schema: '{{.Template}}.schema.json'
+packages:
+  # The reloader hexagon's ports: Watcher, Builder, Upstream, ChildSession,
+  # Frontend (plus any future boundary interfaces in the package).
+  github.com/meigma/template-mcp/tools/proxy/internal/reloader:
+    config:
+      all: true

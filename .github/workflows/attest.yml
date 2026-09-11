@@ -1,0 +1,84 @@
+# Reusable workflow that generates artifact PROVENANCE in isolation from the build
+# jobs that call it. A reusable workflow runs in its own execution context with its
+# own OIDC identity — the caller can inject neither steps nor secrets — so the
+# signing material is unreachable by the build's user-defined steps. That isolation
+# is the SLSA Build L3 requirement; GitHub artifact attestations generated in-job
+# are only L2. Provenance is still written to GitHub's attestation API, so
+# `gh attestation verify` keeps working — but the signer-workflow is now this file:
+#
+#   gh attestation verify <artifact-or-oci-ref> --repo <repo> \
+#     --signer-workflow <repo>/.github/workflows/attest.yml --source-ref refs/tags/<tag>
+#
+# SLSA note: L3 makes the signed provenance unforgeable; it does not, by itself,
+# make the build hermetic. The build job still computes the checksums/digest it
+# passes in — L3's guarantee is that the signature cannot be tampered with because
+# the key lives only in this isolated workflow.
+
+name: Attest (reusable)
+
+on:
+  workflow_call:
+    inputs:
+      checksums-artifact:
+        description: Name of an uploaded artifact containing checksums.txt (binary provenance).
+        type: string
+        required: false
+        default: ''
+      subject-name:
+        description: Fully-qualified image name without tag/digest (container provenance).
+        type: string
+        required: false
+        default: ''
+      subject-digest:
+        description: Image digest in sha256:... form (container provenance).
+        type: string
+        required: false
+        default: ''
+      push-to-registry:
+        description: Attach the image provenance attestation to the registry.
+        type: boolean
+        required: false
+        default: false
+
+permissions: {}
+
+jobs:
+  attest:
+    name: Attest
+    runs-on: ubuntu-24.04
+    permissions:
+      id-token: write       # OIDC token minted HERE, isolated from the build job
+      attestations: write   # write provenance to GitHub's attestation API
+      contents: read
+      packages: write       # used only for the image attestation (push-to-registry)
+    steps:
+      - name: Download checksums
+        if: ${{ inputs.checksums-artifact != '' }}
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.checksums-artifact }}
+
+      - name: Attest binary checksums
+        if: ${{ inputs.checksums-artifact != '' }}
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-checksums: checksums.txt
+
+      # The image provenance is attached to the registry as a referrer, so this
+      # isolated job needs its own GHCR login — the build job's docker login does
+      # not carry into the reusable workflow's separate runner.
+      - name: Log in to GitHub Container Registry
+        if: ${{ inputs.subject-digest != '' }}
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Attest image provenance
+        if: ${{ inputs.subject-digest != '' }}
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
+        with:
+          subject-name: ${{ inputs.subject-name }}
+          subject-digest: ${{ inputs.subject-digest }}
+          push-to-registry: ${{ inputs.push-to-registry }}

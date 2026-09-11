@@ -1,0 +1,41 @@
+# Builds the template-mcp binary into a signed Wolfi apk; apko.yaml assembles it
+# into the minimal multi-arch runtime image. version/commit/date are stamped into
+# the binary via -ldflags, mirroring GoReleaser and the former Dockerfile.
+#
+# package.version is bumped by release-please (extra-files in release-please-config.json).
+# The build-time version/commit/date are injected via --vars-file (see the release
+# workflow and the `image-local` mise task), so no date math runs inside the sandbox.
+package:
+  name: template-mcp
+  version: "0.1.4" # x-release-please-version
+  epoch: 0
+  description: Meigma Go MCP server template
+
+environment:
+  contents:
+    repositories:
+      - https://packages.wolfi.dev/os
+    keyring:
+      - https://packages.wolfi.dev/os/wolfi-signing.rsa.pub
+    packages:
+      - go-1.26
+  environment:
+    CGO_ENABLED: "0"
+
+# Defaults; overridden at build time via `--vars-file` with the real release values.
+vars:
+  version: "0.0.0"
+  commit: "none"
+  date: "unknown"
+
+pipeline:
+  # go/build auto-adds -trimpath and installs to /usr/bin/<output>.
+  - uses: go/build
+    with:
+      packages: ./cmd/template-mcp
+      output: template-mcp
+      go-package: go-1.26
+      modroot: .
+      strip: "-s -w"
+      ldflags: "-buildid= -X main.version=${{vars.version}} -X main.commit=${{vars.commit}} -X main.date=${{vars.date}}"
+      extra-args: "-mod=readonly -buildvcs=false"

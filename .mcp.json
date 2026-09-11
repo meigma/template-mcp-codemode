@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "dev": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "moon run proxy:build >&2 && exec tools/proxy/bin/mcp-devproxy"
+      ]
+    }
+  }
+}

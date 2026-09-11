@@ -1,0 +1,78 @@
+name: Security Scan
+
+on:
+  schedule:
+    - cron: "37 9 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  container-vulnerability-scan:
+    name: Container Vulnerability Scan
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          persist-credentials: false
+
+      - name: Resolve scan metadata
+        id: scan
+        run: |
+          {
+            echo "version=security-scan-${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
+            echo "commit=${GITHUB_SHA}"
+            echo "date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Setup mise
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+        with:
+          version: 2026.6.14
+          cache: true
+
+      - name: Build local scan image (melange + apko)
+        env:
+          VERSION: ${{ steps.scan.outputs.version }}
+          COMMIT: ${{ steps.scan.outputs.commit }}
+          DATE: ${{ steps.scan.outputs.date }}
+        run: |
+          set -euo pipefail
+          printf 'version: "%s"\ncommit: "%s"\ndate: "%s"\n' "$VERSION" "$COMMIT" "$DATE" > melange-vars.yaml
+          melange keygen melange.rsa
+          melange build melange.yaml --arch amd64 --runner docker \
+            --signing-key melange.rsa --source-dir . --vars-file melange-vars.yaml
+          apko build apko.yaml template-mcp:security-scan scan.tar \
+            --arch amd64 --keyring-append ./melange.rsa.pub
+          docker load < scan.tar
+          docker tag template-mcp:security-scan-amd64 template-mcp:security-scan
+
+      - name: Scan local image
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          scan-type: image
+          image-ref: template-mcp:security-scan
+          scanners: vuln,secret,config
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-results.sarif
+          exit-code: "1"
+          hide-progress: true
+          limit-severities-for-sarif: true
+
+      - name: Upload scan results
+        if: ${{ always() && hashFiles('trivy-results.sarif') != '' }}
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
+        with:
+          sarif_file: trivy-results.sarif
+          category: container-vulnerability-scan
