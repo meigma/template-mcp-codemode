@@ -1,4 +1,4 @@
-// Package cli builds the template-mcp command tree.
+// Package cli builds the template-mcp-codemode command tree.
 //
 // The root command wires two transport subcommands onto the same
 // transport-agnostic MCP server from internal/mcpserver: stdio, for clients
@@ -12,12 +12,20 @@ package cli
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
 
-	"github.com/meigma/template-mcp/internal/templateinfo"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+
+	"github.com/meigma/codemode"
+	"github.com/meigma/codemode/authz"
+	hostmcp "github.com/meigma/codemode/mcpserver"
+
+	"github.com/meigma/template-mcp-codemode/internal/mcpserver"
+	"github.com/meigma/template-mcp-codemode/internal/templateinfo"
 )
 
 // BuildInfo describes linker-injected build metadata printed by --version.
@@ -45,11 +53,11 @@ type Options struct {
 	Build BuildInfo
 	// Viper is the configuration instance used by the command tree. Flags are
 	// bound to environment variables named after [templateinfo.EnvPrefix],
-	// for example TEMPLATE_MCP_ADDR.
+	// for example TEMPLATE_MCP_CODEMODE_ADDR.
 	Viper *viper.Viper
 }
 
-// NewRootCommand creates the template-mcp Cobra command tree.
+// NewRootCommand creates the template-mcp-codemode Cobra command tree.
 //
 // The root command does no work on its own; it wires the two transport
 // subcommands (stdio and http) onto the same MCP server. To produce a
@@ -94,17 +102,18 @@ func NewRootCommand(options Options) *cobra.Command {
 	root.SetErr(options.Err)
 
 	// Persistent logging flags apply to every subcommand and bind to
-	// TEMPLATE_MCP_LOG_LEVEL / TEMPLATE_MCP_LOG_FORMAT via initializeConfig.
-	// Logs always go to stderr; stdout stays the JSON-RPC channel.
+	// TEMPLATE_MCP_CODEMODE_LOG_LEVEL / TEMPLATE_MCP_CODEMODE_LOG_FORMAT via
+	// initializeConfig. Logs always go to stderr; stdout stays the JSON-RPC
+	// channel.
 	root.PersistentFlags().String(
 		logLevelFlag,
 		defaultLogLevel,
-		"log level: debug, info, warn, or error (env TEMPLATE_MCP_LOG_LEVEL)",
+		fmt.Sprintf("log level: debug, info, warn, or error (env %s_LOG_LEVEL)", templateinfo.EnvPrefix()),
 	)
 	root.PersistentFlags().String(
 		logFormatFlag,
 		defaultLogFormat,
-		"log format: text or json (env TEMPLATE_MCP_LOG_FORMAT)",
+		fmt.Sprintf("log format: text or json (env %s_LOG_FORMAT)", templateinfo.EnvPrefix()),
 	)
 
 	root.AddCommand(newStdioCommand(options))
@@ -139,4 +148,21 @@ func initializeConfig(cmd *cobra.Command, vp *viper.Viper) error {
 	}
 
 	return nil
+}
+
+// newTemplateServer builds the shared CodeMode MCP server used by both
+// transports. authz.AllowAll is an explicit demo decision, not a constructor
+// default. Runtime limits stay on this composition seam; the CLI does not add
+// limit or Rego flags.
+func newTemplateServer(
+	logger *slog.Logger,
+	version string,
+	resolver hostmcp.InvocationResolver,
+) (*mcp.Server, error) {
+	return mcpserver.New(mcpserver.Options{
+		Version:  version,
+		Logger:   logger,
+		Resolver: resolver,
+		Runtime:  codemode.Options{Authorizer: authz.AllowAll()},
+	})
 }

@@ -1,9 +1,10 @@
-module github.com/meigma/template-mcp
+module github.com/meigma/template-mcp-codemode
 
-go 1.26.4
+go 1.26.6
 
 require (
-	github.com/modelcontextprotocol/go-sdk v1.6.1
+	github.com/meigma/codemode v0.1.0
+	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1

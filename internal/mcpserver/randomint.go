@@ -6,38 +6,36 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/meigma/codemode"
+	"github.com/meigma/codemode/authz"
 )
 
-// randomIntToolName is the registered name of the random_int tool, surfaced to
-// clients via tools/list and tools/call.
-const randomIntToolName = "random_int"
+// randomIntName is the dotted Starlark name of the demo capability.
+const randomIntName = "random.int"
 
-// randomIntInput is the typed input for the random_int tool. The json tags name
-// the JSON Schema properties and the jsonschema tags supply their descriptions;
-// the SDK derives the tool's inputSchema from this struct automatically.
+// randomIntInput is the typed input for random.int. JSON tags name the
+// keyword arguments; CodeMode accepts only json tags on int64 fields.
 type randomIntInput struct {
-	Min int `json:"min" jsonschema:"minimum value, inclusive"`
-	Max int `json:"max" jsonschema:"maximum value, inclusive"`
+	Min int64 `json:"min"`
+	Max int64 `json:"max"`
 }
 
-// randomIntOutput is the typed output for the random_int tool. The SDK derives
-// the tool's outputSchema from this struct and marshals the value into the
-// CallToolResult.StructuredContent field automatically.
+// randomIntOutput is the typed output for random.int.
 type randomIntOutput struct {
-	Value int `json:"value" jsonschema:"the generated random integer"`
+	Value int64 `json:"value"`
 }
 
-// registerRandomInt adds the random_int tool to the server. It accepts the
-// server's [Dependencies] to model the wiring real tools use — a handler that
-// needs a database or HTTP client would close over deps here — even though
-// random_int itself needs none.
-func registerRandomInt(srv *mcp.Server, _ Dependencies) {
-	mcp.AddTool(srv, &mcp.Tool{
-		Name: randomIntToolName,
-		Description: "Return a cryptographically uniform random integer in the " +
-			"inclusive range [min, max]. Returns a tool error if min > max.",
-	}, randomInt)
+// registerRandomInt adds the random.int capability to the builder. It accepts
+// the server's [Dependencies] to model the wiring real capabilities use — a
+// handler that needs a database or HTTP client would close over deps here —
+// even though random.int itself needs none.
+func registerRandomInt(builder *codemode.Builder, _ Dependencies) {
+	codemode.Register(builder, codemode.Capability[randomIntInput, randomIntOutput]{
+		Name: randomIntName,
+		Summary: "Return a cryptographically uniform random integer in the " +
+			"inclusive range [min, max].",
+		Handler: randomInt,
+	})
 }
 
 // randomInt generates a uniformly random integer in [in.Min, in.Max].
@@ -47,34 +45,30 @@ func registerRandomInt(srv *mcp.Server, _ Dependencies) {
 // unpredictable values can substitute math/rand.
 func randomInt(
 	_ context.Context,
-	_ *mcp.CallToolRequest,
+	_ authz.Subject,
 	in randomIntInput,
-) (*mcp.CallToolResult, randomIntOutput, error) {
+) (randomIntOutput, error) {
 	if in.Min > in.Max {
-		// Returning a regular error makes the SDK populate
-		// CallToolResult.IsError, i.e. a tool-level error result the model can
-		// see and self-correct from, NOT a JSON-RPC protocol error. This is the
-		// MCP tool-error convention.
-		return nil, randomIntOutput{}, fmt.Errorf("min (%d) must be <= max (%d)", in.Min, in.Max)
+		return randomIntOutput{}, fmt.Errorf("min (%d) must be <= max (%d)", in.Min, in.Max)
 	}
 
 	// span is the size of the half-open interval [0, span) to draw from, i.e.
 	// max - min + 1. It is computed with big.Int throughout: int64 arithmetic
 	// would overflow for client-controlled extreme ranges (for example
-	// min=math.MinInt, max=math.MaxInt), wrapping to a non-positive value that
-	// makes crypto/rand.Int panic.
-	span := new(big.Int).Sub(big.NewInt(int64(in.Max)), big.NewInt(int64(in.Min)))
+	// min=math.MinInt64, max=math.MaxInt64), wrapping to a non-positive value
+	// that makes crypto/rand.Int panic.
+	span := new(big.Int).Sub(big.NewInt(in.Max), big.NewInt(in.Min))
 	span.Add(span, big.NewInt(1))
 
 	n, err := rand.Int(rand.Reader, span)
 	if err != nil {
-		return nil, randomIntOutput{}, fmt.Errorf("generate random int: %w", err)
+		return randomIntOutput{}, fmt.Errorf("generate random int: %w", err)
 	}
 
-	// Shift the [0, span) draw into the inclusive range [min, max]. The result is
-	// guaranteed to lie within [min, max], so it fits back into an int and Int64
-	// cannot overflow.
-	value := new(big.Int).Add(n, big.NewInt(int64(in.Min)))
+	// Shift the [0, span) draw into the inclusive range [min, max]. The result
+	// is guaranteed to lie within [min, max], so it fits back into an int64
+	// and Int64 cannot overflow.
+	value := new(big.Int).Add(n, big.NewInt(in.Min))
 
-	return nil, randomIntOutput{Value: int(value.Int64())}, nil
+	return randomIntOutput{Value: value.Int64()}, nil
 }
