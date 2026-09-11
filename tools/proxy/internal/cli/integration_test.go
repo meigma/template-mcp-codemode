@@ -77,7 +77,7 @@ type integrationChild struct {
 	// calls records each forwarded call's raw argument bytes, as received.
 	calls chan string
 
-	// setLevel records every logging/setLevel the child receives — the
+	// setLevel records every logging/setLevel the child applies — the
 	// observable proof that the upstream adapter replayed the downstream
 	// client's level to a freshly started child.
 	setLevel chan mcp.LoggingLevel
@@ -118,16 +118,17 @@ func (c *integrationChild) serverSession(t *testing.T) *mcp.ServerSession {
 	return session
 }
 
-// recordSetLevel observes logging/setLevel on the child and feeds setLevel.
+// recordSetLevel reports successfully applied logging levels to setLevel.
 func (c *integrationChild) recordSetLevel() mcp.Middleware {
 	return func(next mcp.MethodHandler) mcp.MethodHandler {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
-			if method == "logging/setLevel" {
+			result, err := next(ctx, method, req)
+			if err == nil && method == "logging/setLevel" {
 				if params, ok := req.GetParams().(*mcp.SetLoggingLevelParams); ok {
 					c.setLevel <- params.Level
 				}
 			}
-			return next(ctx, method, req)
+			return result, err
 		}
 	}
 }
