@@ -1,64 +1,79 @@
 # Contributing
 
-Thank you for your interest in contributing.
-This repository is a Go MCP server template, so changes should keep the generated-project path simple and predictable.
-For private vulnerability reporting, use [SECURITY.md](SECURITY.md) instead of public channels.
+This repository is a Go CodeMode MCP server template. Keep changes focused, preserve the generated-project path, and route private vulnerability reports through [SECURITY.md](SECURITY.md).
 
-## Reporting Bugs
+## Report a bug
 
-Report non-security bugs through GitHub issues.
-Include the following details when possible:
+Use GitHub issues for non-security bugs. Include, when applicable:
 
-- version, commit, or environment details
-- steps to reproduce
-- expected behavior
-- actual behavior
-- logs, screenshots, or a minimal reproduction
+- version, commit, operating system, and architecture;
+- steps to reproduce;
+- expected and actual behavior; and
+- relevant logs or a minimal reproduction.
 
-If you are reporting a security issue, stop and follow [SECURITY.md](SECURITY.md) instead.
+Do not report a vulnerability in a public issue, pull request, or discussion. Follow [SECURITY.md](SECURITY.md) instead.
 
-## Pull Requests
+## Pull requests
 
-Contributors should:
+1. Keep the change scoped to one problem.
+2. Add or update behavior-focused tests when behavior changes.
+3. Update documentation when a user-visible contract changes.
+4. Use a Conventional Commit subject, such as `feat: add records capability` or `fix: honor canceled handler context`.
+5. Run `moon run root:check` before requesting review.
 
-1. Keep changes focused and scoped to a single problem.
-2. Add or update tests when behavior changes.
-3. Update documentation when user-facing behavior changes.
-4. Use Conventional Commit subjects, such as `feat: add config loader` or `fix: handle empty input`.
-5. Make sure `moon run root:check` passes before requesting review.
+A capability change must preserve the CodeMode boundary: register it through `codemode.Register`, not as another direct MCP tool. The externally listed MCP tools remain `search_api`, `describe_api`, and `execute`.
 
-## Local Setup
+## Local setup
 
-The pinned toolchain (Go, Moon, the dev CLIs, Python + uv for the docs) is
-provisioned by [mise](https://mise.jdx.dev) from `mise.toml` + `mise.lock`; Moon
-runs every task against those tools as `system` binaries on PATH. Install mise,
-then provision the toolchain and run the full check:
+Install the pinned Go 1.26.6 toolchain and project tools through [mise](https://mise.jdx.dev):
 
 ```sh
-mise install          # provision every pinned tool, honoring mise.lock
-moon run root:check    # also builds the docs (needs the mise-provided Python + uv)
+mise install
+moon run root:check
 ```
 
-Useful project commands:
+Useful commands:
 
 ```sh
-moon run root:format       # check formatting
-moon run root:format-fix   # apply formatting
+moon run root:format
+moon run root:format-fix
 moon run root:lint
 moon run root:build
 moon run root:test
-moon run docs:serve        # preview the docs at http://127.0.0.1:8000
-go run ./cmd/template-mcp --version
+moon run docs:serve
+go run ./cmd/template-mcp-codemode --version
 ```
 
-A few environment notes:
+The STDIO server blocks until its client closes input or the process receives a signal. This is expected. macOS does not include `timeout` or `gtimeout` by default; use another time-bounding mechanism or install coreutils when a local script needs one.
 
-- macOS has no `timeout`/`gtimeout` by default; install coreutils or use a
-  different mechanism when scripting time-bounded runs.
-- The `stdio` subcommand is a server: it blocks until the client closes its
-  input stream or the process is signaled. That is expected, not a hang.
+## CodeMode worker entry points
 
-## Release Changes
+`codemode.ServeWorkerAndExit()` must remain the first statement of the final binary's `main`, before flags, credentials, service clients, authorizers, handlers, or transports.
 
-Release Please reads Conventional Commit subjects to build changelogs and release PRs.
-Keep release-impacting commits clear; routine docs, CI, and maintenance commits should use the appropriate non-release type.
+A test package that calls `Builder.Build` must define:
+
+```go
+func TestMain(m *testing.M) {
+	codemode.ServeWorkerAndExit()
+	os.Exit(m.Run())
+}
+```
+
+The worker call must also be the first statement of `TestMain`. Do not add setup before it. Package initializers run before either function, so keep them free of privileged setup and irreversible side effects.
+
+## Documentation changes
+
+Use the existing Diátaxis page roles:
+
+- `getting-started.md` is the runnable tutorial.
+- `how-to/add-a-capability.md` is the repository-specific extension procedure.
+- `configuration.md` is the CLI and runtime-options reference.
+- `security.md` explains deployment and execution boundaries.
+
+Link to the [canonical CodeMode documentation](https://meigma.github.io/codemode/) instead of duplicating its full public API, Starlark, or MCP tool reference.
+
+## Release changes
+
+Release Please uses Conventional Commit subjects to prepare the changelog and release pull request. This repository starts at baseline `0.0.0`, with `0.1.0` as its first pending release. Do not restore release entries inherited from another repository.
+
+Changes to release configuration must keep the matching dry-run path current. Review binary names, asset patterns, image names, smoke commands, and signer-workflow references together.

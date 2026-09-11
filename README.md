@@ -1,237 +1,227 @@
-# template-mcp
+# template-mcp-codemode
 
-`template-mcp` is a Go template for building [Model Context Protocol](https://modelcontextprotocol.io) (MCP) servers.
-It is built on the official [`modelcontextprotocol/go-sdk`](https://github.com/modelcontextprotocol/go-sdk) and ships with the protocol and security best practices that an MCP server should have on day one.
+`template-mcp-codemode` is a Go template for building [Model Context Protocol](https://modelcontextprotocol.io) servers with [CodeMode](https://github.com/meigma/codemode). Instead of registering one MCP tool per operation, you register typed Go capabilities. An agent discovers them and composes several calls in one bounded Starlark program.
 
-The template exposes a single demo tool, `random_int`, and demonstrates serving it over two transports from the same server code:
+Every server created from this template exposes exactly three MCP tools:
 
-- **Local** — the STDIO transport (`template-mcp stdio`), which clients spawn as a subprocess.
-- **Networked** — the Streamable HTTP transport (`template-mcp http`), suitable for remote and containerized deployments.
+- `search_api` finds capabilities by name, summary, and search terms.
+- `describe_api` returns the exact input and output shape for one capability.
+- `execute` runs a Starlark program and returns the value from its zero-argument `main()` function.
 
-Generated projects keep the transport they need and delete the other (see [Choosing a transport](#choosing-a-transport)).
+The included `random.int` capability demonstrates typed input and structured output over both STDIO and Streamable HTTP.
 
-## Local Bootstrap
+## Local bootstrap
 
 Prerequisites:
 
-- [mise](https://mise.jdx.dev) — provisions every pinned tool from `mise.toml` +
-  `mise.lock`: Go, Moon, Python + uv (for the MkDocs docs project), the
-  `golangci-lint` and `mockery` CLIs, and `melange`/`apko`/`cosign` for releases.
-  Run `mise install` once; there is nothing else to install by hand.
-- Docker — only to build and scan the container image locally; not needed to run
-  the server itself.
+- [mise](https://mise.jdx.dev), which provisions the pinned Go 1.26.6 toolchain, Moon, Python and uv, the development CLIs, and the release tools from `mise.toml` and `mise.lock`. The server module pins the official MCP Go SDK v1.7.0.
+- Docker, only for local container builds and scans.
 
-Tool versions live in `mise.toml`; `mise.lock` records a per-platform download URL
-and checksum for each (and, for the aqua-backed CLIs, cosign/SLSA/GitHub-attestation
-verification). `mise install` runs with `locked = true`, so it **fails closed** if a
-tool lacks a pre-resolved, checksummed entry for the current platform — replacing the
-former Proto `checksum-url` pins. Moon runs every task against these tools as `system`
-binaries on PATH and manages no toolchain itself. To bump a tool, edit its version in
-`mise.toml`, run `mise lock --platform linux-x64,linux-arm64,macos-x64,macos-arm64`,
-and commit `mise.toml` + `mise.lock`.
+From the repository root:
 
 ```sh
-# Install mise (https://mise.jdx.dev/installing-mise.html), then from the repo
-# root provision every pinned tool (Go, Moon, the dev CLIs, and the release stack):
 mise install
 ```
 
-After creating a new repository from this template, replace the placeholder names before doing feature work:
+`mise install` runs with locked tool resolution. To update a tool, edit `mise.toml`, regenerate `mise.lock` for the supported platforms, and commit both files.
+
+## Run the server
+
+Run the local STDIO transport:
 
 ```sh
-go mod edit -module github.com/meigma/YOUR_REPO
-mv cmd/template-mcp cmd/YOUR_BINARY
+go run ./cmd/template-mcp-codemode stdio
 ```
 
-Then update `template-mcp` references in the Moon tasks, GoReleaser config, `ghd.toml`, README, and package docs.
-The full first-setup checklist lives in [DELETE_ME.md](DELETE_ME.md).
-
-## Running the Server
-
-Run the server over STDIO (the mode a local MCP client launches):
+Run Streamable HTTP on its loopback default:
 
 ```sh
-go run ./cmd/template-mcp stdio
+go run ./cmd/template-mcp-codemode http --addr localhost:8080
 ```
 
-Run the server over Streamable HTTP, bound to loopback by default:
+Both commands build one immutable CodeMode runtime through `internal/mcpserver`. The HTTP command constructs the runtime and MCP server once at startup and shares them across sessions; it does not rebuild the capability catalog per request or per session.
+
+For a local MCP client, build the binary and configure its absolute path:
 
 ```sh
-go run ./cmd/template-mcp http --addr localhost:8080
+go build -o bin/template-mcp-codemode ./cmd/template-mcp-codemode
 ```
 
-Both subcommands build the same `internal/mcpserver` server and differ only in how they connect it to a transport.
+```json
+{
+  "mcpServers": {
+    "template-mcp-codemode": {
+      "command": "/absolute/path/to/template-mcp-codemode/bin/template-mcp-codemode",
+      "args": ["stdio"]
+    }
+  }
+}
+```
 
-## Hot Reload During Development
+## Compose capability calls
 
-The repository ships a dev proxy (`tools/proxy`) and a checked-in `.mcp.json` that wires it up, so developing the server with Claude Code needs no setup.
-Start `claude` in the repository root, approve the project-scoped `dev` server, and edit the server source: the proxy rebuilds on save and swaps the running server behind the live session — new and changed tools appear on the next conversation turn with no reconnect.
-See [tools/proxy/README.md](tools/proxy/README.md) for how it works and its flags.
+Ask the client to find and describe a random integer capability, then run this program through `execute`:
 
-## The Demo Tool
+```python
+def main():
+    left = random.int(min=3, max=3)
+    right = random.int(min=4, max=4)
+    return {
+        "left": left["value"],
+        "right": right["value"],
+        "total": left["value"] + right["value"],
+    }
+```
 
-The template registers one tool, `random_int`, in `internal/mcpserver`.
-It takes `min` and `max` arguments and returns a uniformly random integer in the inclusive range `[min, max]`.
+Each `random.int(...)` call returns a dictionary whose `value` entry is a signed 64-bit integer. The fixed bounds make this example deterministic. The successful structured result is:
 
-The tool is deliberately small but exercises the parts of the protocol you are most likely to use:
+```json
+{"result":{"left":3,"right":4,"total":7}}
+```
 
-- Typed input and output structs, from which the SDK derives the JSON Schemas automatically.
-- Structured output, marshaled from the typed return value by the SDK.
-- The tool-error convention: an invalid range (`min > max`) returns a tool-level error result (`IsError`) rather than a JSON-RPC protocol error.
+Only `main()`'s final converted value is returned. Intermediate capability results remain inside the worker and do not enter the model's context.
 
-Replace `random_int` with your own tool, or add more tools alongside it. The server and transport code do not change when you do.
+## Add capabilities
 
-A tool that needs shared collaborators (a database handle, an HTTP client, a config struct) gets them through the `Dependencies` struct on `mcpserver.Options`: add fields there, and each `registerXxx` function receives them via `Options.Deps`. Because dependencies flow through `Options`, the server stays transport-agnostic. See the [Add a tool](https://meigma.github.io/template-mcp/add-a-tool/) guide for a worked example.
+Capabilities live in `internal/mcpserver`. A capability combines:
 
-## Choosing a Transport
+- a stable deployment and authorization ID;
+- a dotted Starlark name such as `random.int`;
+- discovery metadata;
+- non-pointer input and output structs; and
+- a typed Go handler that receives `context.Context`, the trusted `authz.Subject`, and the input value.
 
-The server in `internal/mcpserver` knows nothing about transports. Each transport is a Cobra subcommand in its own file:
+Use direct exported fields and supported scalar input types. In particular, integer inputs use `int64`, not platform-sized `int`. CodeMode accepts JSON struct tags for capability fields and rejects unrelated struct tags. See [Add a capability](docs/docs/how-to/add-a-capability.md) for the repository procedure and the [canonical CodeMode public API reference](https://meigma.github.io/codemode/reference/public-api/) for the complete type contract.
 
-- `internal/cli/stdio.go` — the `stdio` subcommand.
-- `internal/cli/http.go` — the `http` subcommand.
+## Worker entry points
 
-To keep only one transport, delete the unused file and remove its single registration line in `internal/cli/root.go`. The tool and server code are untouched.
+`codemode.ServeWorkerAndExit()` must be the first statement of the final binary's `main` function. Keep it before flag parsing, credential loading, client construction, and all other host setup. CodeMode re-executes the binary for its worker process; late wiring can run privileged host setup in the worker or make the build-time worker probe fail.
 
-## Security & Best Practices
+Every test binary that calls `Builder.Build` also needs this first statement:
 
-The template bakes in the practices that an MCP server must have. Preserve them as you build on it.
+```go
+func TestMain(m *testing.M) {
+	codemode.ServeWorkerAndExit()
+	os.Exit(m.Run())
+}
+```
 
-- **stdout is reserved for JSON-RPC.** Over the STDIO transport, stdout carries protocol messages only. Writing anything else to stdout — a stray `fmt.Println`, a logger pointed at `os.Stdout` — silently corrupts the stream and is the most common way a stdio server breaks. The template logs to `os.Stderr` only; keep all logging and diagnostics on stderr.
-- **Origin verification and a loopback default for HTTP.** The `http` transport wraps the SDK handler in the standard library's cross-origin protection to defend against DNS-rebinding and CSRF from browsers, and `--addr` defaults to `localhost:8080`. Binding to a non-loopback address exposes the server to the network and is an explicit, security-relevant decision.
-- **The HTTP transport fails closed off loopback.** Cross-origin protection stops malicious browsers, not direct clients such as `curl`. So binding a non-loopback address (for example `0.0.0.0`) with no authentication is refused at startup unless you either set `--auth-token` or pass `--insecure` to opt into an unauthenticated, network-exposed server. The container image defaults to `--insecure` so the demo runs out of the box; remove it and supply real authentication before deploying.
-- **The bearer-auth seam is demo-only.** The HTTP transport includes a minimal, flag-gated bearer-token check that is off by default and exists to show where authorization belongs. It is not production authorization. A production server needs a real OAuth 2.1 resource server: protected-resource metadata (RFC 9728), audience-restricted tokens (RFC 8707), and PKCE with S256. Validate token signature, expiry, and audience against a trusted authorization server.
-- **Authorization is HTTP-only.** Per the MCP specification, authorization applies to HTTP transports only. STDIO servers must not use OAuth; they take any credentials they need from the environment of the process that launched them.
+Add one applicable `TestMain` per Go package. Do not put setup before the worker call.
 
-## Common Tasks
+## Identity and authorization
 
-Moon is the standard task front door:
+The template keeps authentication identity outside program source, tool arguments, and MCP metadata:
+
+- STDIO uses `mcpserver.StaticSubject` with the non-secret subject ID `local`. Process ownership is the authentication boundary.
+- HTTP uses `mcpserver.ContextSubject`. The receiving MCP middleware reads the SDK-authenticated `req.GetExtra().TokenInfo.UserID`, stores that non-secret identity with `authz.WithSubject`, and then lets the CodeMode adapter resolve it. Setting an arbitrary value only on the outer `net/http` request context is not sufficient.
+- The demo verifier sets `TokenInfo.UserID` to `shared-token`; the token value is not used as identity. Allowed loopback and explicitly insecure unauthenticated modes send `development` through the same receiving bridge.
+
+The CLI passes `authz.AllowAll()` explicitly in `codemode.Options` so the demo is runnable. `AllowAll` is authorization, not authentication, and it permits every capability call for every resolved subject. `internal/mcpserver.New` does not supply a hidden fallback authorizer. Replace this demo policy and the HTTP authentication seam before a real deployment.
+
+Discovery is not filtered by per-invocation authorization. An authenticated subject can search and describe every statically enabled capability; authorization runs for each native capability call during `execute`. Do not put secrets or tenant-sensitive data in capability names, summaries, descriptions, search terms, or field names. Disable a capability at build time if its existence must be hidden.
+
+## Choose a transport
+
+Transport code is isolated in `internal/cli`:
+
+- `stdio.go` serves clients that spawn the binary as a local subprocess.
+- `http.go` serves networked and containerized clients.
+
+To keep one transport, delete the unused file and its registration in `internal/cli/root.go`. The capability registrations in `internal/mcpserver` do not change.
+
+## Hot reload during development
+
+The checked-in `.mcp.json` starts the development proxy in `tools/proxy`. Start Claude Code in the repository root, approve the project-scoped `dev` server, and edit `cmd` or `internal`; the proxy rebuilds and swaps the child process behind the existing session.
+
+CodeMode capability changes do not change the outer definitions of `search_api`, `describe_api`, or `execute`, so they normally do not emit `notifications/tools/list_changed`. Validate a reload by calling `search_api`, then `describe_api`, then `execute` and checking the capability result. See [the proxy guide](tools/proxy/README.md) for the exact workflow and its fidelity limits.
+
+## Configuration and logging
+
+Cobra flags take precedence over `TEMPLATE_MCP_CODEMODE_*` environment variables, which take precedence over defaults. Common commands include:
 
 ```sh
-moon run root:format       # check formatting (golangci-lint fmt --diff)
+go run ./cmd/template-mcp-codemode --version
+go run ./cmd/template-mcp-codemode stdio
+go run ./cmd/template-mcp-codemode http --addr localhost:8080
+TEMPLATE_MCP_CODEMODE_LOG_LEVEL=debug go run ./cmd/template-mcp-codemode stdio
+```
+
+A local build reports `template-mcp-codemode dev (none) built unknown`. GoReleaser supplies version, commit, and date for releases.
+
+Both transports log to stderr. STDIO reserves stdout exclusively for JSON-RPC; never write logs or diagnostics there.
+
+CodeMode execution and discovery limits are set programmatically through `mcpserver.Options.Runtime.Limits`. The template does not add limit flags or environment variables. Zero-valued fields receive CodeMode's bounded defaults. See the [configuration reference](docs/docs/configuration.md) for the defaults and option wiring.
+
+## Common tasks
+
+Moon is the task front door:
+
+```sh
+moon run root:format       # check formatting
 moon run root:format-fix   # apply formatting
 moon run root:lint
 moon run root:build
 moon run root:test
-moon run root:check        # format, lint, build, test, docs build, and proxy checks
+moon run root:check        # formatting, lint, builds, tests, docs, and proxy checks
+moon run docs:serve        # documentation preview on http://127.0.0.1:8000
 ```
 
-CI runs the same aggregate check:
+CI runs the same aggregate check with:
 
 ```sh
 moon ci --summary minimal
 ```
 
-Preview the documentation site locally with live reload:
+## Container image
+
+The local image path builds the binary into a signed Wolfi package with [melange](https://github.com/chainguard-dev/melange), then assembles a minimal non-root image with [apko](https://github.com/chainguard-dev/apko):
 
 ```sh
-moon run docs:serve        # serves on http://127.0.0.1:8000
+mise run image-local
+docker run --rm template-mcp-codemode:dev --version
 ```
 
-The CLI entrypoint uses Cobra and Viper in the same shape as other Meigma CLIs: `cmd/template-mcp` stays thin, `internal/cli` owns command construction, and Viper-backed flags such as the HTTP address can also be supplied through `TEMPLATE_MCP_*` environment variables.
+The image runs as uid/gid 65532 and contains CA certificates and timezone data but no shell. Its default command is `http --addr 0.0.0.0:8080 --insecure` so the demonstration starts without credentials. This is intentionally unauthenticated. Remove `--insecure` and install production authentication and authorization before deployment.
 
-```sh
-go run ./cmd/template-mcp --version
-go run ./cmd/template-mcp stdio
-go run ./cmd/template-mcp http --addr localhost:8080
-go test ./...
-```
+## CI and release configuration
 
-A local build reports `template-mcp dev (none) built unknown` — GoReleaser
-injects the real version, commit, and date at release time.
+The CI workflows use minimal permissions, pinned external actions, disabled checkout credential persistence, and dependency caches. Documentation builds on pull requests and deploys from the default branch. A scheduled workflow builds and scans the container image and uploads SARIF to GitHub code scanning. Dependabot covers GitHub Actions, both Go modules, and the docs project.
 
-## Logging and Observability
+This repository starts from a `0.0.0` Release Please baseline. The first pending release is `0.1.0`; no predecessor release history applies to this repository.
 
-Both transports log to stderr (never stdout, which the stdio transport reserves
-for JSON-RPC). Two persistent flags control logging, and each is also settable
-through an environment variable:
+The configured release path is:
 
-```sh
-go run ./cmd/template-mcp http --log-level debug --log-format json
-TEMPLATE_MCP_LOG_LEVEL=debug go run ./cmd/template-mcp stdio
-```
+1. Release Please maintains a release pull request and creates a version tag plus draft GitHub release after merge.
+2. The release dry-run workflow rehearses the GoReleaser binary path and the native-runner melange/apko image path on the release pull request.
+3. GoReleaser builds binaries, checksums, and SBOMs without publishing directly. The release workflow validates and uploads them to the draft release.
+4. Native runners build signed per-architecture Wolfi packages. apko publishes `ghcr.io/meigma/template-mcp-codemode:vX.Y.Z` as a multi-platform image.
+5. The isolated reusable `attest.yml` workflow creates GitHub provenance for binary checksums and the image. The release workflow also creates a keyless Cosign image signature and attaches an SBOM attestation.
+6. A human inspects the draft before publication.
 
-- `--log-level` (`TEMPLATE_MCP_LOG_LEVEL`): `debug`, `info` (default), `warn`, or `error`.
-- `--log-format` (`TEMPLATE_MCP_LOG_FORMAT`): `text` (default) or `json`.
-
-The http transport logs a `listening` line on startup and a clean-shutdown pair
-on exit. Metrics and tracing are intentionally out of scope for the template;
-the `Options.Logger` seam in `internal/mcpserver` is where richer instrumentation
-would attach.
-
-## Container Image
-
-The image is built with [melange](https://github.com/chainguard-dev/melange) — which
-compiles the binary into a signed Wolfi apk — and [apko](https://github.com/chainguard-dev/apko),
-which assembles that apk plus a minimal Wolfi base into a multi-arch, nonroot OCI
-image (uid/gid 65532, ca-certificates, tzdata, no shell). It mirrors the former
-`distroless/static-debian12:nonroot` posture. Build it locally and load it into Docker:
-
-```sh
-mise run image-local                       # builds template-mcp:dev for the host arch
-docker run --rm template-mcp:dev --version
-```
-
-The Wolfi base intentionally floats to the latest (fresh CA bundle/timezones, low CVE
-surface); the exact resolved package versions are recorded in the per-build SBOM and
-provenance attestation rather than pinned in a lockfile. version/commit/date are
-stamped into the binary via melange's `--vars-file`, mirroring GoReleaser.
-
-Containers are the networked deployment, so the image defaults to
-`http --addr 0.0.0.0:8080 --insecure`, which runs the demo unauthenticated;
-`--insecure` is required because the server otherwise refuses to bind a non-loopback
-address without authentication. Before deploying, drop `--insecure` and supply real
-authorization (see the security expectations above). Override the default at runtime,
-for example `docker run --rm template-mcp:dev stdio`.
-
-## CI and Security
-
-The default CI workflow keeps permissions minimal, pins external actions, disables checkout credential persistence, and delegates checks to Moon.
-It uses GitHub-hosted dependency caches for Go, golangci-lint, and uv download artifacts while leaving Moon remote caching as an optional follow-up for repositories that need a shared task-output cache.
-The docs workflow builds the MkDocs site on pull requests and deploys `docs/build` to GitHub Pages from the default branch.
-The scheduled security scan workflow builds the local melange/apko image weekly, scans it for high/critical fixed vulnerabilities, and uploads SARIF results to GitHub code scanning.
-Dependabot covers GitHub Actions, the root and dev-proxy Go modules, and the docs uv project.
-
-Repository settings live in `.github/repository-settings.toml`.
-They default to immutable releases, private vulnerability reporting, signed commits, squash-only merges, GitHub Pages workflow publishing, and protected tags.
-
-## Release Layer
-
-Release automation is enabled for the template application so this repository proves the full binary and container release lifecycle before generated projects inherit it.
-Repositories generated from the template should update the release app credentials, package names, asset patterns, container image name, and `ghd.toml` signer workflow before cutting their first release.
-
-The release path is:
-
-- Release Please opens and maintains the release PR.
-- Release Please creates a draft GitHub release and tag after merge.
-- Release Dry Run rehearses the GoReleaser binary path and the native-runner melange/apko container build path on pull requests.
-- GoReleaser builds binaries, checksums, and SBOMs without publishing directly.
-- The release workflow uploads assets to the draft release; binary checksum provenance is attested from an isolated reusable workflow (`.github/workflows/attest.yml`).
-- The release workflow builds per-arch signed apks with melange on native GitHub-hosted runners, assembles and publishes `ghcr.io/meigma/template-mcp:vX.Y.Z` as a multi-platform apko manifest, signs it with keyless cosign, attaches a GitHub-native SBOM attestation, and attests image provenance from the same isolated `attest.yml` workflow.
-- Provenance is generated in `attest.yml` so its signing key is unreachable by the build jobs (SLSA Build L3). Verify with `gh attestation verify <artifact-or-oci-ref> --signer-workflow <repo>/.github/workflows/attest.yml`; the keyless cosign image signature is still issued by `release.yml`.
-- A human inspects the draft release before publication.
-
-The root `ghd.toml` matches the default GoReleaser output so generated projects can be installed with `ghd` once the release workflow runs.
-After cloning this template, update `provenance.signer_workflow`, package names, asset patterns, binary paths, and image names to match the new repository and binary name.
+Before the first release from a generated project, update the release app credentials, protected-tag bypass, package names, asset patterns, image name, and `ghd.toml` signer workflow. Run the release dry-run workflow before merging that project's first release pull request.
 
 ## Documentation
 
-Full documentation is published at <https://meigma.github.io/template-mcp/>: a getting-started tutorial, an add-a-tool how-to, a configuration reference, and the security model. The Go API reference is on [pkg.go.dev](https://pkg.go.dev/github.com/meigma/template-mcp). Preview the site locally with `moon run docs:serve`.
+- [Getting started](docs/docs/getting-started.md)
+- [Add a capability](docs/docs/how-to/add-a-capability.md)
+- [Configuration](docs/docs/configuration.md)
+- [Security model](docs/docs/security.md)
+- [Canonical CodeMode documentation](https://meigma.github.io/codemode/)
+- [Go API](https://pkg.go.dev/github.com/meigma/template-mcp-codemode)
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines, local setup expectations, and pull request workflow.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup and pull request expectations.
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for supported versions and the private vulnerability reporting path.
+See [SECURITY.md](SECURITY.md) for supported versions and private vulnerability reporting. Read the [security model](docs/docs/security.md) before exposing the HTTP transport or adding privileged handlers.
 
 ## License
 
-Licensed under either of
+Licensed under either of:
 
 - Apache License, Version 2.0 ([LICENSE-APACHE](LICENSE-APACHE))
-- MIT license ([LICENSE-MIT](LICENSE-MIT))
+- MIT License ([LICENSE-MIT](LICENSE-MIT))
 
-at your option (`SPDX-License-Identifier: Apache-2.0 OR MIT`).
-
-Unless you explicitly state otherwise, any contribution intentionally submitted for inclusion in this project by you, as defined in the Apache-2.0 license, shall be dual licensed as above, without any additional terms or conditions.
+at your option (`SPDX-License-Identifier: Apache-2.0 OR MIT`). Unless you state otherwise, a contribution intentionally submitted for inclusion is dual-licensed under those terms.

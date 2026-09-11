@@ -1,25 +1,20 @@
 # mcp-devproxy
 
-`mcp-devproxy` is a hot-reloading development proxy for MCP servers. The
-client (Claude Code) connects to the proxy once and keeps that session for
-the whole dev loop; the proxy watches the source tree, rebuilds the server on
-change, swaps the child process, and re-advertises its tools via
-`notifications/tools/list_changed` — no reconnect, no lost conversation.
+`mcp-devproxy` keeps one client session open while rebuilding and replacing a STDIO MCP server. The client connects to the proxy once; the proxy watches source directories, builds a unique child binary, initializes it, swaps the active child, and forwards calls to the new process.
 
-It exists because developing an MCP server *with* an LLM is otherwise awkward:
-the client spawns the server as a stdio subprocess and reads its tool list at
-session start, so every code change normally requires killing the
-conversation, rebuilding, and reconnecting.
+The proxy lives in the nested module `github.com/meigma/template-mcp-codemode/tools/proxy`, so its development dependencies do not enter the server module or release artifacts.
 
-The proxy is dev tooling: it lives in a nested Go module
-(`github.com/meigma/template-mcp/tools/proxy`) so its dependencies never leak
-into the template's `go.mod`, and it is deliberately excluded from releases.
+This template is CodeMode-native. Every healthy child exposes the same three outer MCP tools:
+
+- `search_api`
+- `describe_api`
+- `execute`
+
+Capabilities such as `random.int` live behind those tools. Adding or changing a capability normally leaves the three tool definitions unchanged.
 
 ## Quick start
 
-Inside this template there is nothing to set up. The repository's checked-in
-`.mcp.json` points Claude Code at a wrapper that builds the proxy through
-Moon's cached `proxy:build` task and then execs it:
+The checked-in `.mcp.json` points Claude Code at a wrapper that builds the proxy with Moon and then replaces the wrapper process with the proxy:
 
 ```json
 {
@@ -35,228 +30,165 @@ Moon's cached `proxy:build` task and then execs it:
 }
 ```
 
-Start `claude` in the repository root, approve the project-scoped `dev`
-server on first use, and edit the server source — the proxy rebuilds and
-hot-swaps the server on every save. Two details of the wrapper are
-load-bearing:
+Start Claude Code in the repository root and approve the project-scoped `dev` server. Edits under `cmd` or `internal` trigger rebuilds.
 
-- The `>&2` redirect: stdout is the JSON-RPC channel on this hop, so the
-  build step's output must go to stderr.
-- Building through `proxy:build` rather than a one-time manual build: the
-  task declares its inputs and outputs, so Moon skips it when nothing
-  changed (warm starts are near-instant) and the proxy binary can never be
-  missing or stale.
+Two parts of the wrapper are required:
 
-To run the proxy with explicit flags — for another repository layout, or
-after renaming the template's binary — the child command after `--` is
-re-run for every reload cycle with `{{artifact}}` replaced by that cycle's
-freshly built binary. The full CLI shape:
+- `>&2` keeps build output away from stdout, which carries JSON-RPC.
+- `proxy:build` declares its inputs and outputs, so Moon can skip a warm build without leaving a missing or stale proxy binary.
+
+The proxy has defaults for this repository. A bare `mcp-devproxy` builds `./cmd/template-mcp-codemode` and runs the artifact with `stdio`. To provide every value explicitly:
 
 ```sh
 mcp-devproxy \
-  --build "go build -o {{artifact}} ./cmd/template-mcp" \
+  --build "go build -o {{artifact}} ./cmd/template-mcp-codemode" \
   --watch cmd --watch internal \
-  [--debounce 300ms] [--quiesce 5s] [--terminate 1s] \
+  --debounce 300ms \
+  --quiesce 5s \
+  --terminate 1s \
   -- {{artifact}} stdio
 ```
 
-**Zero config inside this template:** every flag has a working default for
-this repository's layout, so a bare `mcp-devproxy` (empty `args`) builds and
-serves `./cmd/template-mcp` over stdio. Each defaulted value is announced on
-stderr. The defaults live in one isolated file
-(`internal/cli/defaults.go`) so extracting the proxy to a standalone
-repository stays clean.
+The child command after `--` runs after each successful build. It must contain `{{artifact}}`, because every build uses a new artifact path.
 
 ## Flags and environment
 
-Every flag is also settable through an `MCP_DEVPROXY_*` environment variable;
-flags take precedence over the environment, which takes precedence over
-defaults.
+Flags take precedence over `MCP_DEVPROXY_*` environment variables, which take precedence over defaults.
 
 | Flag | Environment | Default | Meaning |
-|---|---|---|---|
-| `--build` | `MCP_DEVPROXY_BUILD` | `go build -o {{artifact}} ./cmd/template-mcp` * | Build command template. Split on whitespace — no shell, so quoting and arguments containing spaces are not supported. Must reference `{{artifact}}`. |
-| `--watch` | `MCP_DEVPROXY_WATCH` | `cmd`, `internal` * | Directory to watch recursively for source changes. Repeatable; the environment form is a whitespace-separated list. |
-| `--dir` | `MCP_DEVPROXY_DIR` | current directory | Working directory for the build command. |
-| `--debounce` | `MCP_DEVPROXY_DEBOUNCE` | `300ms` | How long source-change bursts are coalesced before a rebuild starts. |
-| `--quiesce` | `MCP_DEVPROXY_QUIESCE` | `5s` | How long a swap waits for in-flight tool calls on the old child to drain. |
-| `--terminate` | `MCP_DEVPROXY_TERMINATE` | `1s` | How long each child shutdown escalation step (stdin close, SIGTERM, SIGKILL) waits. |
-| `--verbose` | `MCP_DEVPROXY_VERBOSE` | `false` | Debug logging on stderr, including build output. |
+| --- | --- | --- | --- |
+| `--build` | `MCP_DEVPROXY_BUILD` | `go build -o {{artifact}} ./cmd/template-mcp-codemode` | Build command template. It is split on whitespace without a shell and must contain `{{artifact}}`. |
+| `--watch` | `MCP_DEVPROXY_WATCH` | `cmd`, `internal` | Recursively watched directory. Repeat the flag; the environment form is whitespace-separated. |
+| `--dir` | `MCP_DEVPROXY_DIR` | Current directory | Working directory for the build command. |
+| `--debounce` | `MCP_DEVPROXY_DEBOUNCE` | `300ms` | Time used to combine a burst of file events into one build. |
+| `--quiesce` | `MCP_DEVPROXY_QUIESCE` | `5s` | Maximum wait for calls on the old child to finish before a swap. |
+| `--terminate` | `MCP_DEVPROXY_TERMINATE` | `1s` | Wait for each shutdown step: close stdin, send `SIGTERM`, then send `SIGKILL`. |
+| `--verbose` | `MCP_DEVPROXY_VERBOSE` | `false` | Enable debug logs, including build output, on stderr. |
 
-\* Template-layout zero-config default, applied only when the flag is unset.
+The build command parser does not interpret shell quoting or arguments containing spaces. Use a wrapper executable when a build requires shell behavior.
 
-The child command is positional argv after `--` (default:
-`{{artifact}} stdio`) and must reference `{{artifact}}` — the rebuilt
-binary's path changes every cycle, so a child command that ignores it would
-run a stale binary forever.
+The default child argv is `{{artifact}} stdio`. An override that omits `{{artifact}}` is rejected because it would continue to run a stale binary.
 
-## How it works
+## Reload lifecycle
 
-The reload lifecycle is `SERVING → BUILDING → STARTING → SWAPPING → SERVING`,
-with every failure edge returning to `SERVING` on the old child:
+The lifecycle is `SERVING → BUILDING → STARTING → SWAPPING → SERVING`. A failure before the swap keeps the last healthy child active.
 
-1. A debounced source change triggers a build into a unique per-cycle
-   artifact path (never overwriting the running child's binary in place).
-2. The new child is spawned, initialized, and health-gated: its tools are
-   listed under a timeout and every definition validated. The old child keeps
-   serving the whole time.
-3. The proxy quiesces (new calls buffer, bounded and with per-call timeouts),
-   waits up to the quiesce grace for in-flight calls, swaps the router to the
-   new child, and closes the old one.
-4. The old and new tool sets are diffed by a canonical fingerprint of the
-   full wire definition; removed tools are unregistered and added or changed
-   tools re-registered, which emits one coalesced `tools/list_changed`. An
-   identical tool set emits nothing.
-5. Buffered calls drain to the new child only if their tool's definition is
-   unchanged; otherwise they get the stale-reload error below.
+1. A debounced source change starts a build at a new artifact path. The running binary is never overwritten in place.
+2. The proxy starts the candidate, performs the MCP handshake, lists its tools under a timeout, and validates every listed definition. The current child continues to serve during this health gate.
+3. The proxy pauses new dispatches and buffers them within bounded count and time limits. It waits for in-flight calls up to `--quiesce`, switches routing to the candidate, and closes the previous child.
+4. The proxy fingerprints and reconciles the outer MCP tool definitions. Removed definitions are unregistered; added or changed definitions are registered. A changed outer list can emit one coalesced `notifications/tools/list_changed`; an identical list emits nothing.
+5. Buffered calls are sent to the new child only when the outer definition for that tool is unchanged. A changed or removed outer tool receives a stale-reload tool result instead.
 
-Cold start serves the client immediately with an empty tool set, then runs
-the first build cycle; the first healthy child triggers a normal reconcile
-and `list_changed`. A broken first build never blocks the session.
+Cold start serves an empty outer tool list while the first build runs. The first healthy child adds `search_api`, `describe_api`, and `execute`, which is an outer tool-list change and can notify the client.
 
-Failure handling, condensed:
+## Capability changes and notifications
+
+A CodeMode capability is catalog data behind the fixed outer tools. Adding `records.lookup`, renaming an input field, changing a summary, or removing `random.int` normally produces the same `tools/list` definitions for `search_api`, `describe_api`, and `execute`.
+
+The proxy therefore does not promise `notifications/tools/list_changed` for a capability-only edit. This is expected, not a failed reload. After the swap:
+
+1. Call `search_api` with task vocabulary that should find the changed capability.
+2. Call `describe_api` with the exact returned dotted name and check its input and output fields.
+3. Call `execute` with a zero-argument `main()` that uses the new shape.
+4. Check the returned capability value, not only the absence of an error.
+
+The existing client session already knows the three outer tools, so it can perform these calls without an outer tool-list refresh.
+
+The stale-call gate also compares outer tool definitions. It cannot detect that the catalog or handler semantics behind an unchanged `execute` definition changed. A call buffered during a capability-only swap may run on the new child. Do not use the proxy as a transactional deployment boundary, and do not assume its outer-definition fingerprint protects a non-idempotent capability across a catalog edit.
+
+## Failure behavior
 
 | Failure | Behavior |
-|---|---|
-| Build fails | Keep the old child; log the compile output; stay `SERVING`. |
-| New child fails init or health gate | Kill it; keep the old child. |
-| First build/child fails (no old child yet) | Serve the empty tool set; retry with backoff. |
-| Child crashes while serving | Restart the last good artifact (build-free) with exponential backoff; the session survives. |
-| Call arrives mid-swap | Buffered; drained to the new child only if the tool's definition is unchanged. |
-| Client exits or the proxy is signaled | Cancel any in-flight cycle, close every child, exit cleanly — no orphans. |
+| --- | --- |
+| Build fails | Keep the current child, log the compiler output, and remain in `SERVING`. |
+| Candidate fails initialization or outer tool validation | Terminate the candidate and keep the current child. |
+| First build or child fails | Keep the downstream session with an empty outer tool set and retry with backoff. |
+| Active child crashes | Restart the last good artifact without rebuilding, using exponential backoff. |
+| Call arrives during a swap | Buffer it within the configured count and timeout. |
+| Buffered outer tool changed or disappeared | Return a readable stale-reload tool result instead of forwarding it. |
+| Old child call outlives the quiesce period | Return an interruption result that says it may have executed; never replay it automatically. |
+| Client exits or proxy receives a signal | Cancel the current cycle, close children, and exit. |
 
-**Stale-reload errors.** A call issued against a tool the reload changed or
-removed — buffered mid-swap, or sent by a session that has not re-listed
-since the swap — is answered with a tool *result* (not a protocol error) the
-LLM can read and self-correct from:
+Reloads become visible when a build and swap complete. They are not synchronized with an agent's conversational turn.
 
-> tool "name" changed by dev reload; list refreshes next turn
+## Forwarding limits
 
-The gate opens the moment the session re-lists, which Claude Code does on
-`list_changed`. A non-idempotent call issued against old semantics is never
-silently executed on new code.
+The proxy forwards tools only. A child that uses other MCP features sees these differences:
 
-Tool changes do not propagate mid-turn: reloads land whenever a build
-finishes, and the client observes the new tool set at its next turn boundary.
+- Sampling and elicitation return errors because the upstream client has no handlers for them.
+- `roots/list` returns method not found.
+- Prompts and resources appear empty downstream. The proxy logs a warning when the child advertises either.
+- Progress tokens are removed from forwarded calls, but request cancellation still propagates.
+- Child initialization instructions are not forwarded because the downstream session exists before the first child.
 
-## v1 fidelity gaps
-
-The proxy forwards tools only. A child that relies on the following will see
-differences from running directly, and every gap is logged loudly on stderr:
-
-- **Sampling and elicitation** — the child gets an error; the proxy's
-  upstream client has no handlers for them.
-- **Roots** — `roots/list` is rejected with a method-not-found error.
-- **Prompts and resources** — they appear *empty* to the client (the
-  downstream capability envelope advertises them so a later version can
-  forward them without a reconnect). The health gate logs a prominent warning
-  when a child actually advertises prompts or resources.
-- **Progress** — progress tokens are stripped from forwarded calls;
-  cancellation still propagates.
-- **Instructions** — the child's `instructions` are not forwarded (the
-  downstream session initializes before the first child exists).
-
-Child MCP `logging` is forwarded: the client's last `logging/setLevel` is
-replayed to each new child, and child log notifications flow back downstream.
+Child MCP logging is forwarded. The client's latest `logging/setLevel` value is replayed to each replacement child.
 
 ## Observability
 
-- All proxy logging goes to **stderr**. stdout is the JSON-RPC protocol
-  channel on both hops; nothing else may write to it.
-- Each child's stderr is passed through to the proxy's stderr — the developer
-  sees their server's logs as if it ran directly. The child also inherits the
-  proxy's environment, as a direct run would.
-- `--verbose` enables debug logging, including each cycle's build output.
+All proxy logs go to stderr. Stdout is the downstream JSON-RPC stream. A child's stderr is copied to proxy stderr, and the child inherits the proxy environment.
 
-## Manual acceptance procedure
+Use `--verbose` to include build output and lifecycle details.
 
-The automated suites prove the proxy against a real MCP client and real child
-processes, but the load-bearing client behavior — Claude Code re-fetching and
-*applying* tool lists on `list_changed` — can only be verified against Claude
-Code itself. Run this procedure inside this repository whenever Claude Code's
-major version changes, and record the results in the table below.
+For a temporary reload log while using Claude Code, append a stderr redirect to the wrapper command:
 
-### Setup
-
-1. The checked-in `.mcp.json` already builds and launches the proxy. To watch
-   the reload cycle, temporarily append a stderr redirect to its wrapper
-   command:
-
-   ```json
-   {
-     "mcpServers": {
-       "dev": {
-         "command": "sh",
-         "args": [
-           "-c",
-           "moon run proxy:build >&2 && exec tools/proxy/bin/mcp-devproxy 2>>/tmp/mcp-devproxy.log"
-         ]
-       }
-     }
-   }
-   ```
-
-2. Start a tmux session with two panes from the repository root: one running
-   `claude` (the conversation under test), one for editing source and tailing
-   `/tmp/mcp-devproxy.log`.
-
-### Scenarios
-
-**(a) Added tool.** In the live conversation, confirm an existing tool (for
-example `random_int`) is callable through the proxy. In the other pane, add a
-new tool to `internal/mcpserver` that returns an unguessable secret string,
-and save. Wait for the rebuild in the log, then — next turn — ask Claude to
-call the new tool by name. **Pass:** Claude calls it and reports the secret,
-with no reconnect. (This re-validates the 2026-06-09 bare-server result
-through the full proxy.)
-
-**(b) Schema-only change to a same-named tool.** Change only the schema of an
-existing tool — rename one of `random_int`'s parameters, or add a new
-required parameter — and save. Next turn, ask Claude to call that tool.
-Record which outcome occurs:
-
-- Claude applies the refreshed schema and the call succeeds with new-shape
-  arguments; or
-- Claude sends old-shape arguments — before it re-lists, the proxy's stale
-  gate answers with the friendly stale-reload error; after it re-lists, the
-  child's own validation rejects the stale arguments.
-
-This scenario settles the open question of whether Claude Code refreshes the
-cached definition of a same-named tool; until it is settled, only the second
-outcome's behavior is guaranteed.
-
-**(c) Cold start, pre-first-turn `list_changed`.** End the Claude Code
-session and start a fresh one (which spawns the proxy). Begin a conversation
-immediately. **Pass:** the session starts instantly (the tool set may be
-empty on the very first turn), and the first build's tools are present and
-callable by the first or second turn without a reconnect.
-
-### Results
-
-| Date | Claude Code version | (a) added tool | (b) schema-only change | (c) cold start | Notes |
-|---|---|---|---|---|---|
-| — | — | — | — | — | Not yet run through the proxy. |
-
-### Empirical notes
-
-- **2026-06-09, Claude Code 2.1.170 (bare server, pre-proxy):** Claude Code
-  honors `tools/list_changed` on a live session — it re-fetched the tool list
-  and called a newly added tool (returning an unguessable secret) the next
-  turn, with no reconnect. This is the design's load-bearing fact.
-- **2026-06-10, integration suite:** each child accepts a
-  fresh, proxy-identity `initialize` — nothing replays the downstream
-  client's init params. The handshake, logging-level replay, and health gate
-  all succeed under the proxy's own identity (`TestIntegrationColdStart` in
-  `internal/cli/integration_test.go`).
-
-## Development
-
-```sh
-moon run proxy:check                 # format, lint, build, test
-go test -short ./...                 # skips the slow E2E test
+```json
+{
+  "mcpServers": {
+    "dev": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "moon run proxy:build >&2 && exec tools/proxy/bin/mcp-devproxy 2>>/tmp/mcp-devproxy.log"
+      ]
+    }
+  }
+}
 ```
 
-The E2E test (`internal/cli/e2e_test.go`) runs a real `go build` and real
-child processes; it is guarded by `testing.Short()` and builds offline by
-construction (enforced with `GOPROXY=off`). CI runs it un-short via
-`proxy:test`.
+Remove the redirect after the investigation.
+
+## Manual CodeMode reload checks
+
+Run these checks after changing the proxy, its child handshake, or the CodeMode adapter, and when upgrading a client's major version.
+
+### Added capability
+
+1. In the live session, call `search_api` for `random integer`, describe `random.int`, and execute it once.
+2. Add a capability with a unique search term and a handler that returns an unguessable value.
+3. Wait until stderr shows a successful build and swap.
+4. Call `search_api` with the unique term, then `describe_api` with the returned exact name.
+5. Call `execute` and return the capability's value from `main()`.
+
+Pass when search and description show the new capability and `execute` returns the unguessable value without reconnecting. Do not require `tools/list_changed`; the outer definitions are unchanged.
+
+### Input-shape change
+
+1. Change an existing capability's input field name or required shape without renaming the capability.
+2. Wait for a successful swap.
+3. Repeat `search_api` and `describe_api`; confirm the new signature and field shape.
+4. Run an `execute` program with the new keyword arguments and check its final result.
+5. Optionally run the old source and confirm CodeMode rejects its arguments rather than dispatching the handler.
+
+Pass when description and execution use the new shape. An outer list-change notification is not part of this check.
+
+### Removed capability
+
+1. Remove a capability registration and wait for a successful swap.
+2. Search for its exact name and task vocabulary.
+3. Describe the old exact name.
+4. Execute a program that calls the old name.
+
+Pass when search no longer returns it, description reports `capability not found`, and execution does not dispatch the removed handler.
+
+### Cold start
+
+Start a new client session. The initial outer list can be empty while the first build runs. Pass when the first healthy child makes `search_api`, `describe_api`, and `execute` available and they can discover and execute `random.int` without reconnecting.
+
+## Develop the proxy
+
+```sh
+moon run proxy:check
+go test -short ./...
+```
+
+The short command skips the slow end-to-end test. The end-to-end test performs a real build and starts real child processes with network module lookup disabled; CI runs it through the proxy test task.
