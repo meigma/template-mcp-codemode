@@ -35,8 +35,8 @@ workspace:
 
 # format/lint reuse the root .golangci.yml. No local-prefix override is needed:
 # goimports matches local-prefixes by string prefix, so the root's
-# 'github.com/meigma/template-mcp' already covers this nested module's path
-# ('github.com/meigma/template-mcp/tools/proxy').
+# 'github.com/meigma/template-mcp-codemode' already covers this nested module's path
+# ('github.com/meigma/template-mcp-codemode/tools/proxy').
 tasks:
   format:
     command: 'golangci-lint fmt --config ../../.golangci.yml --diff'

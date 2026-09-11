@@ -41,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--artifacts", default=Path("dist/artifacts.json"), type=Path)
     parser.add_argument("--config", default=Path("ghd.toml"), type=Path)
     parser.add_argument("--output", default=Path("dist/release-assets"), type=Path)
-    parser.add_argument("--binary-name", default="template-mcp")
+    parser.add_argument("--binary-name", default="template-mcp-codemode")
     return parser.parse_args(argv)
 
 

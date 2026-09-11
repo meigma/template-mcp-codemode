@@ -1,4 +1,4 @@
-# mise: tool + environment management for template-mcp.
+# mise: tool + environment management for template-mcp-codemode.
 #
 # mise REPLACES Proto (the former .prototools + .moon/proto/*). The committed
 # mise.lock records per-platform download URLs + checksums; for aqua-backed tools
@@ -16,7 +16,7 @@
 
 [tools]
 # Language runtimes (core backend).
-go = "1.26.4"
+go = "1.26.6"
 python = "3.14.3"
 
 # Go dev-tool CLIs. Explicit `aqua:` refs force the VERIFYING backend (checksum +
@@ -41,7 +41,7 @@ python = "3.14.3"
 
 [env]
 # Pin the Go toolchain: never auto-download a toolchain other than the one above.
-# The version here is authoritative and matches go.mod's `go 1.26.4`.
+# The version here is authoritative and matches go.mod's `go 1.26.6`.
 GOTOOLCHAIN = "local"
 
 # Local container image. CI builds the release image via the melange/apko jobs in
@@ -49,7 +49,7 @@ GOTOOLCHAIN = "local"
 # Linux, so `--runner docker` makes `image-local` work on macOS too (Docker Desktop
 # runs the Linux build container).
 [tasks.image-local]
-description = "Build the apko image for the host arch and load it into Docker as template-mcp:dev"
+description = "Build the apko image for the host arch and load it into Docker as template-mcp-codemode:dev"
 run = '''
 set -euo pipefail
 arch="$(go env GOARCH)"
@@ -60,10 +60,10 @@ printf 'version: "dev"\ncommit: "%s"\ndate: "%s"\n' \
   "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > .melange-vars.local.yaml
 melange build melange.yaml --arch "$arch" --signing-key melange.rsa --runner docker \
   --source-dir . --vars-file .melange-vars.local.yaml
-apko build apko.yaml template-mcp:dev image.tar --arch "$arch" --keyring-append ./melange.rsa.pub
+apko build apko.yaml template-mcp-codemode:dev image.tar --arch "$arch" --keyring-append ./melange.rsa.pub
 docker load < image.tar
-docker tag "template-mcp:dev-$arch" template-mcp:dev
-echo "loaded template-mcp:dev (host arch $arch)"
+docker tag "template-mcp-codemode:dev-$arch" template-mcp-codemode:dev
+echo "loaded template-mcp-codemode:dev (host arch $arch)"
 '''
 
 [settings]

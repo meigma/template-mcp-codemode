@@ -8,7 +8,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/reloader"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/reloader"
 )
 
 // childSession is one live child MCP connection, implementing the

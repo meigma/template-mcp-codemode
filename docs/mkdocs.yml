@@ -1,8 +1,8 @@
-site_name: template-mcp
-site_description: Meigma Go MCP server template
-site_url: https://meigma.github.io/template-mcp/
-repo_name: meigma/template-mcp
-repo_url: https://github.com/meigma/template-mcp
+site_name: template-mcp-codemode
+site_description: Meigma CodeMode MCP server template
+site_url: https://meigma.github.io/template-mcp-codemode/
+repo_name: meigma/template-mcp-codemode
+repo_url: https://github.com/meigma/template-mcp-codemode
 edit_uri: edit/master/docs/docs/
 docs_dir: docs
 site_dir: build
@@ -36,7 +36,7 @@ theme:
 nav:
   - Home: index.md
   - Getting started: getting-started.md
-  - Add a tool: add-a-tool.md
+  - Add a capability: how-to/add-a-capability.md
   - Configuration: configuration.md
   - Security: security.md
 

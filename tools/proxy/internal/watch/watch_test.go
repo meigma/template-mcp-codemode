@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/reloader"
-	"github.com/meigma/template-mcp/tools/proxy/internal/watch"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/reloader"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/watch"
 )
 
 const eventTimeout = 5 * time.Second

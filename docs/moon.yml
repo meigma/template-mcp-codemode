@@ -7,8 +7,8 @@ tags:
   - 'uv'
 
 project:
-  title: 'template-mcp docs'
-  description: 'MkDocs documentation site for the Meigma Go MCP server template.'
+  title: 'template-mcp-codemode docs'
+  description: 'MkDocs documentation site for the Meigma CodeMode MCP server template.'
   owner: 'meigma'
   maintainers:
     - 'meigma'

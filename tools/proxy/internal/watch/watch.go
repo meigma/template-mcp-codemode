@@ -11,7 +11,7 @@ import (
 
 	"github.com/fsnotify/fsnotify"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/reloader"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/reloader"
 )
 
 // eventBufferSize is the fsnotify event buffer size; it absorbs editor save

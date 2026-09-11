@@ -9,7 +9,8 @@
   "bump-patch-for-minor-pre-major": true,
   "packages": {
     ".": {
-      "package-name": "template-mcp",
+      "package-name": "template-mcp-codemode",
+      "initial-version": "0.1.0",
       "changelog-path": "CHANGELOG.md",
       "extra-files": ["melange.yaml", "apko.yaml"]
     }
