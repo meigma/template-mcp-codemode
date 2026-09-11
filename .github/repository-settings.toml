@@ -95,7 +95,7 @@ block_force_pushes = true
 bypass = [
   { type = "repository_admin_role", mode = "always" },
   # Release Please needs tag-creation bypass because tags are protected here.
-  { type = "app", slug = "meigma-release-please", mode = "always" },
+  { type = "app", slug = "meigma-release", mode = "always" },
 ]
 
 [rulesets.tags_default.status_checks]
