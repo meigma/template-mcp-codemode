@@ -184,11 +184,7 @@ func serveHTTP(ctx context.Context, ln net.Listener, cfg httpConfig) error {
 	// unauthenticated requests are rejected as early as possible. The shared
 	// demo identity is installed only after the verifier succeeds.
 	if cfg.authToken != "" {
-		rootHandler = requireBearerToken(cfg.authToken, cfg.addr)(
-			withTrustedSubject(authz.Subject{ID: httpSharedTokenSubjectID})(rootHandler),
-		)
-	} else {
-		rootHandler = withTrustedSubject(authz.Subject{ID: httpDevelopmentSubjectID})(rootHandler)
+		rootHandler = requireBearerToken(cfg.authToken, cfg.addr)(rootHandler)
 	}
 
 	srv := &http.Server{
@@ -334,17 +330,6 @@ func requireBearerToken(token, addr string) func(http.Handler) http.Handler {
 	})
 }
 
-// withTrustedSubject installs subject on the HTTP request context so
-// ContextSubject can resolve it. Callers must derive subject from the
-// authentication boundary, never from tool arguments or request metadata.
-func withTrustedSubject(subject authz.Subject) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			next.ServeHTTP(w, r.WithContext(authz.WithSubject(r.Context(), subject)))
-		})
-	}
-}
-
 // installHTTPSubject copies per-request identity into the MCP handler context.
 // TokenInfo is present only after the demo bearer verifier succeeds. Unauthenticated
 // loopback and --insecure modes receive the explicit development identity.
@@ -355,11 +340,11 @@ func installHTTPSubject(authenticated bool) mcp.Middleware {
 		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
 			extra := req.GetExtra()
 			if extra != nil && extra.TokenInfo != nil {
-				ctx = authz.WithSubject(ctx, authz.Subject{ID: httpSharedTokenSubjectID})
+				ctx = authz.WithSubject(ctx, authz.Subject{ID: authz.SubjectID(extra.TokenInfo.UserID)})
 				return next(ctx, method, req)
 			}
 			if authenticated {
-				return next(ctx, method, req)
+				return next(authz.WithSubject(ctx, authz.Subject{}), method, req)
 			}
 			return next(authz.WithSubject(ctx, authz.Subject{ID: httpDevelopmentSubjectID}), method, req)
 		}

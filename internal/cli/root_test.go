@@ -75,7 +75,6 @@ func TestHTTPCommandDefaultsAddrToLoopback(t *testing.T) {
 	assert.Equal(t, "localhost:8080", addr, "the default bind address must stay loopback")
 }
 
-
 // findSubcommand returns the named direct subcommand of root, failing the test
 // when it is not registered.
 func findSubcommand(t *testing.T, root *cobra.Command, name string) *cobra.Command {

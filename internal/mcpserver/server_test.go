@@ -314,4 +314,3 @@ func requireToolError(t *testing.T, result *mcp.CallToolResult, expected string)
 	require.True(t, ok, "tool error content must be text")
 	assert.Equal(t, expected, text.Text)
 }
-
