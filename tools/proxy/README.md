@@ -123,6 +123,8 @@ The proxy forwards tools only. A child that uses other MCP features sees these d
 
 Child MCP logging is forwarded. The client's latest `logging/setLevel` value is replayed to each replacement child.
 
+The nested proxy module currently pins Go SDK v1.6.1 to preserve this logging contract without disabling deprecation checks. [SDK v1.7.0](https://github.com/modelcontextprotocol/go-sdk/releases/tag/v1.7.0) deprecates MCP logging and removes `logging/setLevel` from protocol `2026-07-28`; upgrading the proxy requires an explicit logging migration, not just a dependency bump. This constraint does not apply to the production server, which already uses SDK v1.7.0.
+
 ## Observability
 
 All proxy logs go to stderr. Stdout is the downstream JSON-RPC stream. A child's stderr is copied to proxy stderr, and the child inherits the proxy environment.
