@@ -1,7 +1,7 @@
 [project]
-name = "template-mcp-docs"
+name = "template-mcp-codemode-docs"
 version = "0.0.0"
-description = "MkDocs documentation site for the Meigma Go MCP server template."
+description = "MkDocs documentation site for the Meigma CodeMode MCP server template."
 requires-python = ">=3.14"
 dependencies = [
     "mkdocs-material>=9.7.0",

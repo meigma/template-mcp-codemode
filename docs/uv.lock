@@ -378,7 +378,7 @@ wheels = [
 ]
 
 [[package]]
-name = "template-mcp-docs"
+name = "template-mcp-codemode-docs"
 version = "0.0.0"
 source = { virtual = "." }
 dependencies = [

@@ -14,7 +14,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/jsonrpc"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/reloader"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/reloader"
 )
 
 // artifactToken is the placeholder in the child argv template replaced with

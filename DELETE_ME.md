@@ -1,224 +1,204 @@
-# Welcome to the Meigma MCP Server Template
+# Set up a repository created from the CodeMode template
 
-This repository was generated from `template-mcp`, the standard starter for Meigma [Model Context Protocol](https://modelcontextprotocol.io) servers.
-It gives a new MCP server a working baseline on day one: a transport-agnostic server built on the official `modelcontextprotocol/go-sdk`, two ready-to-use transports (STDIO and Streamable HTTP), a single demo tool, Moon task orchestration, pinned CI, dependency automation, repository security defaults, and an enabled release pipeline that has already been exercised by the template application.
+This repository was generated from `template-mcp-codemode`. It includes a transport-agnostic CodeMode runtime, STDIO and Streamable HTTP transports, one demo capability, a development proxy, documentation, CI, and release configuration.
 
-Delete this file after you finish the first-repository setup checklist below.
-It is only here to orient the initial project owner.
+Complete this checklist before feature work, then delete this file.
 
-## What This Template Provides
+## Template layout
 
-- A minimal Go module at `github.com/meigma/template-mcp`.
-- A transport-agnostic MCP server in `internal/mcpserver` with one demo tool, `random_int`.
-- A Cobra/Viper CLI under `cmd/template-mcp` and `internal/cli`, with two transport subcommands: `stdio` and `http`.
-- Moon tasks for `format`, `lint`, `build`, `test`, and `check`.
-- A hot-reloading dev loop: a checked-in `.mcp.json` wires Claude Code to the dev proxy in `tools/proxy`, which rebuilds the server on save and swaps it behind the live session.
-- `golangci-lint` provisioned by mise and wired through Moon.
-- CI that delegates to `moon ci --summary minimal` with pinned actions, dependency caches, and minimal token permissions.
-- A scheduled container vulnerability scan that uploads SARIF results to GitHub code scanning.
-- Dependabot coverage for GitHub Actions, Go modules, and the docs uv project.
-- MkDocs Material docs scaffolding under `docs/`, with GitHub Pages as the default publishing target.
-- Repository settings for signed commits, squash-only merges, immutable releases, private vulnerability reporting, and protected tags.
-- Release workflows for Release Please, GoReleaser binary assets, GHCR container images, checksums, SBOMs, and GitHub artifact attestations.
-- A root `ghd.toml` package manifest so released binaries can be installed with `ghd`.
+- `cmd/template-mcp-codemode` is the thin executable entry point. `codemode.ServeWorkerAndExit()` is its first statement.
+- `internal/cli` constructs the Cobra command tree, resolves configuration, selects trusted subjects, and runs each transport.
+- `internal/mcpserver` builds one immutable CodeMode runtime, registers capabilities, and adapts it to the three MCP tools `search_api`, `describe_api`, and `execute`.
+- `internal/templateinfo` owns the binary name, client-visible title, and derived environment-variable prefix.
+- `tools/proxy` is a nested Go module that rebuilds and swaps the STDIO child during development.
 
-## How It Works
+The HTTP command constructs one runtime and MCP server at startup and shares them across all MCP sessions. Keep database pools, clients, and other shared dependencies in `mcpserver.Options.Deps`; do not construct a runtime per session.
 
-The package layout keeps the server independent of any transport:
+## Collect the new identity
 
-- `cmd/template-mcp` — thin entrypoint that wires signal handling into the CLI.
-- `internal/cli` — builds the Cobra command tree. `root.go` registers the subcommands; `stdio.go` and `http.go` each own one transport.
-- `internal/mcpserver` — constructs the MCP server and registers the `random_int` tool. It knows nothing about transports.
-- `internal/templateinfo` — the single source of truth for the application name and title, and the derived `TEMPLATE_MCP_*` environment-variable prefix. Renaming the app to your project starts here. (Build metadata — version, commit, date — is separate: GoReleaser injects it via ldflags into `cmd/template-mcp/main.go`.)
+Choose each value independently:
 
-Both subcommands call `mcpserver.New(...)` and differ only in how they connect it to a transport, so swapping or deleting a transport never touches the tool or server code.
+| Variable | Template value | Used for |
+| --- | --- | --- |
+| `OWNER` | `meigma` | Go modules, repository URLs, GHCR image, docs, and signer workflow. |
+| `REPO` | `template-mcp-codemode` | Repository name, root module suffix, GHCR image, and docs URLs. |
+| `BINARY` | `template-mcp-codemode` | `cmd` directory, executable, build output, release assets, and container entry point. |
+| `NAME` | `template-mcp-codemode` | `templateinfo.Name`, Cobra command, MCP implementation name, and environment prefix. |
+| `TITLE` | `Meigma CodeMode MCP server template` | `templateinfo.Title` and the client-visible MCP implementation title. |
 
-Developing the server with Claude Code needs no setup: the checked-in `.mcp.json` builds the dev proxy (`tools/proxy`) through Moon's cached `proxy:build` task and launches it.
-Start `claude` in the repository root, approve the project-scoped `dev` server, and edit the server source — changed tools appear on the next conversation turn with no reconnect.
-See `tools/proxy/README.md` for how the proxy works.
+Derived values:
 
-Moon is the main entrypoint for local development and CI:
+- Root module: `github.com/OWNER/REPO`
+- Proxy module: `github.com/OWNER/REPO/tools/proxy`
+- Environment prefix: uppercase `NAME` with hyphens replaced by underscores (`template-mcp-codemode` becomes `TEMPLATE_MCP_CODEMODE`)
+- Image: `ghcr.io/OWNER/REPO`
+
+Do not collapse these values into one global replacement. A repository name, binary name, client-visible title, and environment prefix can differ.
+
+## Files to regenerate or reset
+
+Do not blindly rewrite generated or historical files during the identity search:
+
+- Reset `CHANGELOG.md` to one `# Changelog` heading. Release Please writes the new project's history.
+- Regenerate `docs/uv.lock` with `uv lock` after changing `docs/pyproject.toml`.
+- Let `go mod tidy` update each `go.sum`.
+- Ignore generated output such as `bin/`, `coverage.out`, `dist/`, and `docs/build/`.
+- Do not rename this file. Delete it after the checklist is complete.
+
+## Rename the project
+
+### 1. Rename both Go modules
+
+The root and development proxy are separate modules:
+
+```sh
+go mod edit -module github.com/OWNER/REPO
+(cd tools/proxy && go mod edit -module github.com/OWNER/REPO/tools/proxy)
+```
+
+Update imports that refer to the template module. Preserve the `github.com/meigma/codemode` dependency and imports; CodeMode is the runtime library, not a template identity surface.
+
+### 2. Rename the binary
+
+```sh
+mv cmd/template-mcp-codemode cmd/BINARY
+```
+
+Update every build-source and output path, including:
+
+- root `moon.yml`
+- `.goreleaser.yaml`
+- `melange.yaml`
+- `apko.yaml`
+- `ghd.toml`
+- release and security-scan workflows
+- `tools/proxy/internal/cli/defaults.go`
+- `.mcp.json` if its invocation changes
+- README and documentation commands
+
+### 3. Rename application identity
+
+Update `Name` and `Title` in `internal/templateinfo/info.go`. `Name` controls the Cobra command, MCP implementation name, and environment prefix. `Title` is reported to MCP clients.
+
+Search for every template identity, including human-readable variants:
+
+```sh
+rg -i "template-mcp-codemode|TEMPLATE_MCP_CODEMODE|Meigma CodeMode MCP server template|meigma"
+```
+
+Map each result to `OWNER`, `REPO`, `BINARY`, `NAME`, or `TITLE`. Update the root and proxy module paths, repository URLs, package names, binary paths, container image, release assets, `ghd.toml` signer workflow, documentation metadata, and environment-variable examples.
+
+Do not replace upstream CodeMode names or links. The fixed adapter default implementation identity `codemode` and its three MCP tool names also belong to the upstream protocol surface, not this repository's brand.
+
+## Preserve worker wiring
+
+CodeMode re-executes the final binary for each program worker. This line must remain the first statement of `main`:
+
+```go
+func main() {
+	codemode.ServeWorkerAndExit()
+	// ordinary host setup follows
+}
+```
+
+It must precede signal setup, flag parsing, credentials, clients, authorizers, handlers, and transports. Package initialization still runs before `main`, so do not put privileged setup or irreversible side effects in package initializers.
+
+Every test package that calls `Builder.Build` needs:
+
+```go
+func TestMain(m *testing.M) {
+	codemode.ServeWorkerAndExit()
+	os.Exit(m.Run())
+}
+```
+
+Keep the worker call as the first statement. A test package that never builds a CodeMode server does not need `TestMain`.
+
+## Replace the demo capability
+
+Add your real capabilities before removing `random.int` so the server remains useful throughout the cutover. For each capability:
+
+1. Define non-pointer input and output structs with supported fields and JSON tags.
+2. Use `int64` for integer inputs; CodeMode does not accept platform-sized `int` input fields.
+3. Register a stable capability ID, dotted name, discovery metadata, and typed handler through `codemode.Register`.
+4. Pass shared collaborators through `mcpserver.Dependencies` and close over them in the handler.
+5. Add behavior-focused tests and update the expected capability catalog.
+6. Delete `randomint.go`, its tests, and its registration after the replacement capabilities are registered.
+
+Do not register each capability as a direct MCP tool. The MCP surface remains exactly `search_api`, `describe_api`, and `execute`.
+
+Keep `codemode.ServeWorkerAndExit` in the final binary and applicable test binaries. Keep the CodeMode module dependency and the `mcpserver.Options.Runtime` construction even after the demo capability is removed.
+
+## Replace demo identity and authorization
+
+The template's identity and policy wiring is explicit:
+
+- STDIO uses `mcpserver.StaticSubject` because local process ownership is its authentication boundary.
+- HTTP uses `mcpserver.ContextSubject`. The MCP receiving middleware copies the SDK-authenticated `req.GetExtra().TokenInfo.UserID` into `authz.WithSubject`; an arbitrary value added only to the outer `net/http` request context is not the adapter's identity channel.
+- The demo verifier sets `TokenInfo.UserID` to `shared-token`. Loopback or explicit `--insecure` requests without authentication use `development`. These are development identities, not production principals.
+- The CLI passes `authz.AllowAll()` so the demo permits every call. `internal/mcpserver.New` has no hidden authorization fallback.
+
+For production HTTP, replace the shared-token verifier with real authentication that sets a stable, non-secret `auth.TokenInfo.UserID`. Keep the receiving-middleware bridge and `mcpserver.ContextSubject`; the bridge installs that ID as an `authz.Subject` with `authz.WithSubject` on the MCP handler context. Replace `AllowAll` with an authorizer appropriate for the enabled capabilities and their canonical arguments. Do not derive identity from Starlark source, MCP tool arguments, `_meta`, unvalidated headers, or arbitrary outer HTTP context values.
+
+Discovery is not authorization-filtered. Every authenticated subject can search and describe every statically enabled capability. Do not place secrets or tenant-sensitive details in discovery metadata; use static capability disabling when a deployment must hide a capability's existence.
+
+## Choose a transport
+
+The template includes both transports:
+
+- Keep STDIO for a server launched as a local subprocess.
+- Keep Streamable HTTP for a remote or containerized server.
+
+To remove a transport, delete its file in `internal/cli` and its registration in `internal/cli/root.go`. Capability registration remains in `internal/mcpserver`.
+
+If you keep HTTP, preserve the one-runtime-at-startup design. Do not move `mcpserver.New` into the SDK's per-session factory.
+
+## Configure releases
+
+The template starts at Release Please baseline `0.0.0`; its first pending release is `0.1.0`. A generated project must keep its own changelog and release history.
+
+For a binary plus container release:
+
+- Update `.goreleaser.yaml`: project, build ID, main package, binary, archive names, and package paths.
+- Update `ghd.toml`: signer workflow, package name, description, asset patterns, and installed path.
+- Update `melange.yaml`: package name, description, Go package, and output.
+- Update `apko.yaml`: local package, entry point, command, image annotations, and source URL.
+- Update the release, dry-run, and security-scan workflows: image name, binary validation paths, smoke commands, and summaries.
+- Update `release-please-config.json` and keep `.release-please-manifest.json` at the intended initial baseline.
+- Configure the release GitHub App credentials, protected-tag bypass, and package permissions.
+
+If the project is binary-only, remove the melange/apko jobs, image scan, image configuration, and container required checks. If it is container-only, remove GoReleaser, `ghd.toml`, binary jobs, and binary required checks. Keep the release dry run for every release path that remains.
+
+## Update documentation
+
+Rewrite `README.md` and `docs/docs/` for the real capabilities and retained transports. Update `docs/mkdocs.yml` (`site_url`, `repo_name`, `repo_url`, and `edit_uri`) for the generated repository. Review `CONTRIBUTING.md` and `SECURITY.md` and update the license holder if needed.
+
+Link to the [canonical CodeMode documentation](https://meigma.github.io/codemode/) for the complete runtime, type, MCP tool, and security contracts rather than copying the upstream reference into the generated project.
+
+## Regenerate and verify
+
+Regenerate module and documentation metadata:
+
+```sh
+go mod tidy
+(cd tools/proxy && go mod tidy)
+(cd docs && uv lock)
+```
+
+Run the repository gate:
 
 ```sh
 moon run root:check
 ```
 
-That aggregate check runs the Go formatter/linter/build/tests plus the docs build.
-The GitHub Actions CI workflow runs the same path through:
+Then repeat the identity search. It should return no template-owned identity except intentional historical context that you reviewed:
 
 ```sh
-moon ci --summary minimal
+rg -i "template-mcp-codemode|TEMPLATE_MCP_CODEMODE|Meigma CodeMode MCP server template|meigma"
 ```
 
-The workflow caches Go modules, Go build artifacts, golangci-lint state, and uv's download cache through GitHub Actions. If that is not enough for a larger generated repository, add Moon remote caching later with Depot or another Bazel Remote Execution-compatible backend and repository credentials.
+Finally, build the renamed binary and use a real MCP client to call `search_api`, `describe_api`, and `execute` against one replacement capability over the retained transport. Delete this file after those checks pass:
 
-The `GitHub Pages` workflow builds the MkDocs site on pull requests and deploys the default-branch `docs/build` output to Pages. The repository settings manifest defaults Pages to workflow-based publishing with HTTPS enforcement.
-
-The release machinery is intentionally enabled in the template repository so the starter app proves Release Please, GoReleaser binary releases, native-runner container image builds, artifact validation, and attestations before generated projects inherit the setup.
-The nominal generated-project path is a server with both a downloadable binary and a container image. If the new project is binary-only, container-only, trim the release files as described below before the first release.
-
-## First Setup Checklist
-
-This checklist is the canonical first-setup procedure, written to be followed
-top-to-bottom by a person or an AI agent. Collect the inputs below first, then
-work through the steps. Two self-checks at the end (a search and a build) confirm
-the rename is complete.
-
-### Inputs
-
-Decide these values once; every step below refers to them. Most projects set
-`REPO`, `BINARY`, and `NAME` to the same string, but they are allowed to differ.
-
-| Variable | This template's value | Used for |
-|----------|----------------------|----------|
-| `OWNER` | `meigma` | GitHub org/user: module paths, `ghcr.io/OWNER/...`, ghd `signer_workflow`, docs URLs, `apko.yaml` image source annotation, Moon `owner` |
-| `REPO` | `template-mcp` | repository name: the root module's last segment, the GHCR image, docs `repo_name`/`repo_url`/`site_url` |
-| `BINARY` | `template-mcp` | command/binary name: `cmd/<BINARY>`, build outputs, `.goreleaser.yaml`, `ghd.toml` name/assets/path, `melange.yaml`/`apko.yaml` |
-| `NAME` | `template-mcp` | `templateinfo.Name`; **derives** the `TEMPLATE_MCP_*` env prefix |
-| `TITLE` | `Meigma MCP server template` | `templateinfo.Title`, reported to MCP clients; also `melange.yaml`/`apko.yaml`/docs descriptions |
-
-Derived automatically — do not treat these as separate inputs:
-
-- Root module = `github.com/OWNER/REPO`; nested module = `github.com/OWNER/REPO/tools/proxy`.
-- Env prefix = uppercase, hyphens-to-underscores of `NAME` (`template-mcp` → `TEMPLATE_MCP`); see `EnvPrefix` in `internal/templateinfo/info.go`.
-- GHCR image = `ghcr.io/OWNER/REPO`; ghd `signer_workflow` = `OWNER/REPO/.github/workflows/release.yml`.
-
-### Do not hand-edit (leave alone or regenerate)
-
-The search in step 5 also matches files you must NOT blindly rewrite:
-
-- `CHANGELOG.md` — release history with real commit/PR URLs. Reset it to a single `# Changelog` heading (Release Please regenerates it); do not rewrite the historical links.
-- `docs/uv.lock` — regenerate with `cd docs && uv lock` after editing `docs/pyproject.toml`. Never hand-edit.
-- `go.sum` — fixed by `go mod tidy`. No manual edits.
-- Build/coverage outputs (`bin/`, `coverage.out`, `docs/build/`) — generated; ignore.
-- `DELETE_ME.md` (this file) — removed in the final step, so don't rename text inside it.
-
-### Steps
-
-1. Rename the Go modules. There are two: the root module and the nested dev
-   proxy under `tools/proxy`.
-
-   ```sh
-   go mod edit -module github.com/OWNER/REPO
-   (cd tools/proxy && go mod edit -module github.com/OWNER/REPO/tools/proxy)
-   ```
-
-2. Rename the binary directory:
-
-   ```sh
-   mv cmd/template-mcp cmd/<BINARY>
-   ```
-
-   The build *source* path `./cmd/template-mcp` is hardcoded in several places and is a hard build-break on rename, not cosmetic. Update every one:
-
-   - the root `moon.yml` `build` task (`go build -o bin/template-mcp ./cmd/template-mcp`),
-   - `.goreleaser.yaml` `main` (`./cmd/template-mcp`),
-   - the `melange.yaml` `go/build` pipeline (`packages: ./cmd/template-mcp`, `output: template-mcp`), and
-   - `defaultBuildCommand` in `tools/proxy/internal/cli/defaults.go`, which the dev proxy's zero-config default uses (or pass explicit `--build` and child arguments in `.mcp.json`).
-
-3. Choose one transport.
-
-   The template ships both the STDIO and Streamable HTTP transports so you can compare them. Most servers keep one:
-
-   - **STDIO** for a server the client launches as a local subprocess.
-   - **Streamable HTTP** for a remote or containerized server.
-
-   To keep only one transport, delete the unused subcommand file and remove its single registration line in `internal/cli/root.go`:
-
-   - Keeping STDIO: delete `internal/cli/http.go` and its registration in `root.go`.
-   - Keeping HTTP: delete `internal/cli/stdio.go` and its registration in `root.go`.
-
-   The `internal/mcpserver` server and the `random_int` tool do not change when you drop a transport.
-
-4. Replace the demo tool.
-
-   `random_int` in `internal/mcpserver` is a placeholder that exists to prove the end-to-end tool path. Replace it with your own tool (typed input/output structs plus a handler registered via the SDK), or add more tools alongside it; each tool lives in its own file (`randomint.go`) with a matching test file (`randomint_test.go`). The transport subcommands stay the same.
-
-5. Replace template placeholders. Search case-insensitively and include the
-   human brand variants, not just the slug — a slug-only search misses the
-   client-visible title:
-
-   ```sh
-   rg -i "template-mcp|TEMPLATE_MCP|meigma|MCP server template"
-   ```
-
-   Map each hit to the right input from the table above (`OWNER`, `REPO`,
-   `BINARY`, `NAME`, `TITLE`) instead of doing one global replace — these axes can
-   differ. Skip the files listed under "Do not hand-edit" above.
-
-   In particular, update `Name` and `Title` in `internal/templateinfo/info.go`:
-   `Title` ("Meigma MCP server template") is reported to MCP clients as the
-   server implementation title, so a stale value ships your project under the
-   template's brand. `EnvPrefix` (and the `TEMPLATE_MCP_*` variables) derive from
-   `Name`, so renaming `Name` renames them.
-
-   Also update Go imports, Moon metadata, README and docs text. For
-   release-bearing projects, update `.goreleaser.yaml`,
-   `release-please-config.json`, `ghd.toml`, `melange.yaml`, `apko.yaml`, and
-   `.github/workflows/release*.yml` as applicable.
-   Update `docs/mkdocs.yml` (`site_url`, `repo_name`, `repo_url`, `edit_uri`)
-   with the generated repository's GitHub Pages URL, usually
-   `https://OWNER.github.io/REPO/`.
-
-6. Refresh generated metadata:
-
-   ```sh
-   go mod tidy
-   (cd tools/proxy && go mod tidy)
-   (cd docs && uv lock)        # regenerate the docs lockfile after the pyproject rename
-   ```
-
-7. Configure releases for the chosen shape.
-
-   For the nominal binary plus container case:
-
-   - Update `.goreleaser.yaml`: `project_name`, build `id`, `main`, binary name, archive name template, and any linked package paths.
-   - Update `ghd.toml`: `provenance.signer_workflow`, package name, description, asset patterns, and installed binary path.
-   - Update `melange.yaml`: `package.name`, `description`, and the `go/build` `packages`/`output`. Update `apko.yaml`: the `@local` package name, image annotations (title/description/source), and the default `cmd` to match the transport you kept (containers usually run `http`).
-   - Update `.github/workflows/release.yml`: `IMAGE_NAME`, binary validation names, the published image tag, smoke-test commands, summary commands, and verification examples.
-   - Update `.github/workflows/release-dry-run.yml`: binary validation names, local apko image name, and smoke-test commands.
-   - Update `.github/workflows/security-scan.yml`: local container image name and scan category.
-   - Update `.github/repository-settings.toml` only if required status-check names change.
-
-   For binary-only projects:
-
-   - Keep `.goreleaser.yaml`, `ghd.toml`, `Release Please`, `Binary Release Dry Run`, and the binary asset portions of `release.yml`.
-   - Remove the `melange-build` and `container-image-release` jobs, container verification summary text, and `Melange Build Dry Run` / `Container Image Dry Run`.
-   - Remove `melange.yaml`, `apko.yaml`, the `image-local` mise task, and `.github/workflows/security-scan.yml` if no container build remains.
-   - Remove `Container Image Dry Run` from required branch checks.
-
-   For container-only projects:
-
-   - Keep `Release Please`, `Melange Build Dry Run`, `Container Image Dry Run`, `melange-build`, `container-image-release`, `melange.yaml`, and `apko.yaml`.
-   - Remove `.goreleaser.yaml`, `ghd.toml`, `binary-release-assets`, binary verification summary text, and `Binary Release Dry Run`.
-   - Change `container-image-release` so it depends only on `resolve-release` and `melange-build`.
-   - Remove `Binary Release Dry Run` from required branch checks.
-
-   In every release-bearing project, configure the release app credentials, protected-tag bypass, and repository package permissions before the first release. Run the release dry-run workflow after these edits and before merging the first release PR.
-
-8. Verify the rename. First make sure the toolchain is installed (see the
-   "Install prerequisites" section of the README: install mise, then `mise install`),
-   then run both gates:
-
-   ```sh
-   # Build/lint/test/docs gate — fails on broken module paths, build-source
-   # paths, or an out-of-date docs lockfile.
-   moon run root:check
-
-   # Completeness gate — should print NOTHING. Any remaining hit is a missed
-   # rename (or CHANGELOG history you deliberately reset).
-   rg -i "template-mcp|TEMPLATE_MCP|meigma|MCP server template"
-   ```
-
-9. Update project-facing docs:
-
-   - Rewrite `README.md` for the actual server, including its real tools and the transport you kept.
-   - Rewrite the docs site pages under `docs/docs/` (`index.md`, `getting-started.md`, `add-a-tool.md`, `configuration.md`, `security.md`) for the real server.
-   - Review `CONTRIBUTING.md` and `SECURITY.md`.
-   - The template is dual-licensed (`LICENSE-APACHE` / `LICENSE-MIT`). Keep both or swap to your project's license, and update the copyright holder in `LICENSE-MIT`.
-
-10. Delete this file:
-
-    ```sh
-    rm DELETE_ME.md
-    ```
+```sh
+rm DELETE_ME.md
+```

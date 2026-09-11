@@ -1,9 +1,10 @@
 # Minimal, multi-arch, nonroot runtime image assembled from the locally-built
-# template-mcp apk (melange.yaml) plus the Wolfi base packages. Mirrors the former
-# gcr.io/distroless/static-debian12:nonroot posture (uid 65532, ca-certs, tzdata,
-# no shell). The Wolfi base intentionally floats to the latest (fresh CA
-# bundle/timezones, low CVE surface); the exact resolved versions are recorded in
-# the per-build SBOM + provenance attestation rather than pinned in a lockfile.
+# template-mcp-codemode apk (melange.yaml) plus the Wolfi base packages. Mirrors
+# the former gcr.io/distroless/static-debian12:nonroot posture (uid 65532,
+# ca-certs, tzdata, no shell). The Wolfi base intentionally floats to the latest
+# (fresh CA bundle/timezones, low CVE surface); the exact resolved versions are
+# recorded in the per-build SBOM + provenance attestation rather than pinned in a
+# lockfile.
 contents:
   repositories:
     - https://packages.wolfi.dev/os
@@ -16,7 +17,7 @@ contents:
     - wolfi-baselayout
     - ca-certificates-bundle
     - tzdata
-    - template-mcp@local
+    - template-mcp-codemode@local
 
 # Containers are the networked deployment, so the image defaults to the http
 # transport bound to all interfaces. `--insecure` is required because the server
@@ -24,7 +25,7 @@ contents:
 # real authorization before deploying. Override the args (e.g. `docker run ... stdio`)
 # or the whole command at runtime.
 entrypoint:
-  command: /usr/bin/template-mcp
+  command: /usr/bin/template-mcp-codemode
 cmd: http --addr 0.0.0.0:8080 --insecure
 
 # Create the nonroot user/group (uid/gid 65532) and run as it — Wolfi has no
@@ -44,7 +45,7 @@ archs:
   - arm64
 
 annotations:
-  org.opencontainers.image.title: template-mcp
-  org.opencontainers.image.description: Meigma Go MCP server template
-  org.opencontainers.image.source: https://github.com/meigma/template-mcp
-  org.opencontainers.image.version: "0.1.4" # x-release-please-version
+  org.opencontainers.image.title: template-mcp-codemode
+  org.opencontainers.image.description: Meigma CodeMode MCP server template
+  org.opencontainers.image.source: https://github.com/meigma/template-mcp-codemode
+  org.opencontainers.image.version: "0.0.0" # x-release-please-version

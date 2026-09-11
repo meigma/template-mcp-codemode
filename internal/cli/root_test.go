@@ -30,7 +30,7 @@ func TestVersionFlagPrintsBuildMetadata(t *testing.T) {
 	err := root.ExecuteContext(context.Background())
 
 	require.NoError(t, err)
-	assert.Equal(t, "template-mcp 0.1.0 (abc1234) built 2026-05-08T10:00:00Z\n", stdout.String())
+	assert.Equal(t, "template-mcp-codemode 0.1.0 (abc1234) built 2026-05-08T10:00:00Z\n", stdout.String())
 	assert.Empty(t, stderr.String(), "version output must not write to stderr")
 }
 
@@ -46,7 +46,7 @@ func TestVersionFlagDefaultsToDevMetadata(t *testing.T) {
 	root.SetArgs([]string{"--version"})
 
 	require.NoError(t, root.ExecuteContext(context.Background()))
-	assert.Equal(t, "template-mcp dev (none) built unknown\n", stdout.String())
+	assert.Equal(t, "template-mcp-codemode dev (none) built unknown\n", stdout.String())
 }
 
 func TestRootCommandRegistersTransportSubcommands(t *testing.T) {

@@ -50,16 +50,16 @@ jobs:
           melange keygen melange.rsa
           melange build melange.yaml --arch amd64 --runner docker \
             --signing-key melange.rsa --source-dir . --vars-file melange-vars.yaml
-          apko build apko.yaml template-mcp:security-scan scan.tar \
+          apko build apko.yaml template-mcp-codemode:security-scan scan.tar \
             --arch amd64 --keyring-append ./melange.rsa.pub
           docker load < scan.tar
-          docker tag template-mcp:security-scan-amd64 template-mcp:security-scan
+          docker tag template-mcp-codemode:security-scan-amd64 template-mcp-codemode:security-scan
 
       - name: Scan local image
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           scan-type: image
-          image-ref: template-mcp:security-scan
+          image-ref: template-mcp-codemode:security-scan
           scanners: vuln,secret,config
           vuln-type: os,library
           severity: HIGH,CRITICAL

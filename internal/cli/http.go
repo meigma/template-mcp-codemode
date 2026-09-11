@@ -15,7 +15,10 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/auth"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/meigma/template-mcp/internal/mcpserver"
+	"github.com/meigma/codemode/authz"
+	hostmcp "github.com/meigma/codemode/mcpserver"
+
+	"github.com/meigma/template-mcp-codemode/internal/templateinfo"
 )
 
 const (
@@ -41,6 +44,14 @@ const (
 	// the token's own exp claim instead.
 	demoTokenLifetime = time.Hour
 )
+
+// httpSharedTokenSubjectID is the demo non-secret identity installed after the
+// shared bearer token verifies. It is not the token value.
+const httpSharedTokenSubjectID authz.SubjectID = "shared-token"
+
+// httpDevelopmentSubjectID is the explicit development identity for allowed
+// loopback and --insecure unauthenticated HTTP modes.
+const httpDevelopmentSubjectID authz.SubjectID = "development"
 
 // httpConfig carries the resolved http subcommand configuration into runHTTP.
 type httpConfig struct {
@@ -89,13 +100,20 @@ func newHTTPCommand(options Options) *cobra.Command {
 
 	// --addr defaults to loopback, not 0.0.0.0: binding to all interfaces
 	// exposes the server to the local network and is a deliberate opt-in.
-	cmd.Flags().String(addrFlag, "localhost:8080", "address to listen on (env TEMPLATE_MCP_ADDR)")
+	cmd.Flags().String(
+		addrFlag,
+		"localhost:8080",
+		fmt.Sprintf("address to listen on (env %s_ADDR)", templateinfo.EnvPrefix()),
+	)
 	// --auth-token is empty by default, which disables auth. See requireBearerToken
 	// for the heavy caveats: this is a DEMO-ONLY seam, not production auth.
 	cmd.Flags().String(
 		authTokenFlag,
 		"",
-		"DEMO-ONLY shared bearer token; empty disables auth (env TEMPLATE_MCP_AUTH_TOKEN)",
+		fmt.Sprintf(
+			"DEMO-ONLY shared bearer token; empty disables auth (env %s_AUTH_TOKEN)",
+			templateinfo.EnvPrefix(),
+		),
 	)
 	// --insecure is the explicit opt-in to bind a non-loopback address without
 	// authentication. Without it, runHTTP refuses such a configuration so a
@@ -103,7 +121,10 @@ func newHTTPCommand(options Options) *cobra.Command {
 	cmd.Flags().Bool(
 		insecureFlag,
 		false,
-		"allow binding a non-loopback address without authentication (UNSAFE; env TEMPLATE_MCP_INSECURE)",
+		fmt.Sprintf(
+			"allow binding a non-loopback address without authentication (UNSAFE; env %s_INSECURE)",
+			templateinfo.EnvPrefix(),
+		),
 	)
 
 	return cmd
@@ -137,13 +158,18 @@ func serveHTTP(ctx context.Context, ln net.Listener, cfg httpConfig) error {
 		logger = slog.New(slog.DiscardHandler)
 	}
 
-	// The factory runs once per session, so each client gets a fresh server with
-	// no shared state — the safe default. If your tools need state shared across
-	// sessions (a cache, a DB pool), construct the server once outside this
-	// closure and return the same *mcp.Server for every request instead.
+	// One CodeMode runtime and MCP server for the process. Identity is not
+	// captured here: HTTP uses ContextSubject and per-request trusted context.
+	mcpServer, err := newTemplateServer(logger, cfg.build.Version, hostmcp.ContextSubject())
+	if err != nil {
+		closeErr := ln.Close()
+		return errors.Join(err, closeErr)
+	}
+	mcpServer.AddReceivingMiddleware(installHTTPSubject(cfg.authToken != ""))
+
 	handler := mcp.NewStreamableHTTPHandler(
 		func(*http.Request) *mcp.Server {
-			return mcpserver.New(mcpserver.Options{Version: cfg.build.Version, Logger: logger})
+			return mcpServer
 		},
 		nil,
 	)
@@ -155,7 +181,8 @@ func serveHTTP(ctx context.Context, ln net.Listener, cfg httpConfig) error {
 
 	// When a token is configured, gate the server behind the DEMO-ONLY bearer
 	// middleware. The middleware runs outside CrossOriginProtection so that
-	// unauthenticated requests are rejected as early as possible.
+	// unauthenticated requests are rejected as early as possible. The shared
+	// demo identity is installed only after the verifier succeeds.
 	if cfg.authToken != "" {
 		rootHandler = requireBearerToken(cfg.authToken, cfg.addr)(rootHandler)
 	}
@@ -191,7 +218,7 @@ func serveHTTP(ctx context.Context, ln net.Listener, cfg httpConfig) error {
 		}
 	}()
 
-	err := srv.Serve(ln)
+	err = srv.Serve(ln)
 	close(serveDone)
 	if err != nil && !errors.Is(err, http.ErrServerClosed) {
 		return fmt.Errorf("serve http: %w", err)
@@ -217,9 +244,10 @@ func checkBindSecurity(addr, authToken string, insecure bool) error {
 
 	return fmt.Errorf(
 		"refusing to bind non-loopback address %q without authentication: "+
-			"set --auth-token (env TEMPLATE_MCP_AUTH_TOKEN) to require a bearer token, "+
+			"set --auth-token (env %s_AUTH_TOKEN) to require a bearer token, "+
 			"or pass --insecure to expose all tools unauthenticated (UNSAFE)",
 		addr,
+		templateinfo.EnvPrefix(),
 	)
 }
 
@@ -280,9 +308,11 @@ func requireBearerToken(token, addr string) func(http.Handler) http.Handler {
 
 		// The middleware requires a non-zero expiration and the configured
 		// scopes. A real verifier would read these from the validated token.
+		// UserID is the demo non-secret identity, never the shared secret.
 		return &auth.TokenInfo{
 			Scopes:     []string{demoAuthScope},
 			Expiration: time.Now().Add(demoTokenLifetime),
+			UserID:     string(httpSharedTokenSubjectID),
 		}, nil
 	}
 
@@ -298,4 +328,25 @@ func requireBearerToken(token, addr string) func(http.Handler) http.Handler {
 		ResourceMetadataURL: fmt.Sprintf("http://%s/.well-known/oauth-protected-resource", addr),
 		Scopes:              []string{demoAuthScope},
 	})
+}
+
+// installHTTPSubject copies per-request identity into the MCP handler context.
+// TokenInfo is present only after the demo bearer verifier succeeds. Unauthenticated
+// loopback and --insecure modes receive the explicit development identity.
+// When a token is configured and TokenInfo is missing, the subject is left
+// unset so ContextSubject fails closed.
+func installHTTPSubject(authenticated bool) mcp.Middleware {
+	return func(next mcp.MethodHandler) mcp.MethodHandler {
+		return func(ctx context.Context, method string, req mcp.Request) (mcp.Result, error) {
+			extra := req.GetExtra()
+			if extra != nil && extra.TokenInfo != nil {
+				ctx = authz.WithSubject(ctx, authz.Subject{ID: authz.SubjectID(extra.TokenInfo.UserID)})
+				return next(ctx, method, req)
+			}
+			if authenticated {
+				return next(authz.WithSubject(ctx, authz.Subject{}), method, req)
+			}
+			return next(authz.WithSubject(ctx, authz.Subject{ID: httpDevelopmentSubjectID}), method, req)
+		}
+	}
 }

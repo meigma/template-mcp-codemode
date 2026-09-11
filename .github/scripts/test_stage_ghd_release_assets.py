@@ -61,36 +61,36 @@ class StageGhdReleaseAssetsTest(unittest.TestCase):
                 staged,
                 [
                     "checksums.txt",
-                    "template-mcp_1.2.3_darwin_amd64",
-                    "template-mcp_1.2.3_darwin_amd64.sbom.json",
-                    "template-mcp_1.2.3_darwin_arm64",
-                    "template-mcp_1.2.3_darwin_arm64.sbom.json",
-                    "template-mcp_1.2.3_linux_amd64",
-                    "template-mcp_1.2.3_linux_amd64.sbom.json",
-                    "template-mcp_1.2.3_linux_arm64",
-                    "template-mcp_1.2.3_linux_arm64.sbom.json",
+                    "template-mcp-codemode_1.2.3_darwin_amd64",
+                    "template-mcp-codemode_1.2.3_darwin_amd64.sbom.json",
+                    "template-mcp-codemode_1.2.3_darwin_arm64",
+                    "template-mcp-codemode_1.2.3_darwin_arm64.sbom.json",
+                    "template-mcp-codemode_1.2.3_linux_amd64",
+                    "template-mcp-codemode_1.2.3_linux_amd64.sbom.json",
+                    "template-mcp-codemode_1.2.3_linux_arm64",
+                    "template-mcp-codemode_1.2.3_linux_arm64.sbom.json",
                 ],
             )
-            linux_binary = root / "dist/release-assets/template-mcp_1.2.3_linux_amd64"
+            linux_binary = root / "dist/release-assets/template-mcp-codemode_1.2.3_linux_amd64"
             mode = linux_binary.stat().st_mode
             self.assertTrue(mode & stat.S_IXUSR)
-            self.assertIn("dist/release-assets/template-mcp_1.2.3_linux_arm64", stdout)
+            self.assertIn("dist/release-assets/template-mcp-codemode_1.2.3_linux_arm64", stdout)
 
     def test_fails_on_missing_checksum_entry(self) -> None:
-        with fixture(missing_checksum="template-mcp_1.2.3_linux_arm64") as root:
+        with fixture(missing_checksum="template-mcp-codemode_1.2.3_linux_arm64") as root:
             result, _, stderr = run_script(root)
 
             self.assertEqual(result, 1)
             self.assertIn("missing checksum entry", stderr)
-            self.assertIn("template-mcp_1.2.3_linux_arm64", stderr)
+            self.assertIn("template-mcp-codemode_1.2.3_linux_arm64", stderr)
 
     def test_fails_on_checksum_mismatch(self) -> None:
-        override = ("template-mcp_1.2.3_linux_amd64", "0" * 64)
+        override = ("template-mcp-codemode_1.2.3_linux_amd64", "0" * 64)
         with fixture(checksum_override=override) as root:
             result, _, stderr = run_script(root)
 
             self.assertEqual(result, 1)
-            self.assertIn("checksum mismatch for template-mcp_1.2.3_linux_amd64", stderr)
+            self.assertIn("checksum mismatch for template-mcp-codemode_1.2.3_linux_amd64", stderr)
 
     def test_fails_on_wrong_signer_workflow(self) -> None:
         with fixture(signer="other/repo/.github/workflows/attest.yml") as root:
@@ -104,7 +104,7 @@ class StageGhdReleaseAssetsTest(unittest.TestCase):
             result, _, stderr = run_script(root)
 
             self.assertEqual(result, 1)
-            self.assertIn("missing expected binary asset template-mcp_1.2.3_linux_arm64", stderr)
+            self.assertIn("missing expected binary asset template-mcp-codemode_1.2.3_linux_arm64", stderr)
 
     def test_fails_on_unexpected_asset_count(self) -> None:
         with fixture(extra_binary=True) as root:
@@ -117,7 +117,7 @@ class StageGhdReleaseAssetsTest(unittest.TestCase):
 def run_script(root: Path) -> tuple[int, str, str]:
     stdout = io.StringIO()
     stderr = io.StringIO()
-    with working_directory(root), github_repository("meigma/template-mcp"):
+    with working_directory(root), github_repository("meigma/template-mcp-codemode"):
         with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
             result = stage_ghd_release_assets.main(["--tag", "v1.2.3"])
     return result, stdout.getvalue(), stderr.getvalue()
@@ -126,7 +126,7 @@ def run_script(root: Path) -> tuple[int, str, str]:
 @contextlib.contextmanager
 def fixture(
     *,
-    signer: str = "meigma/template-mcp/.github/workflows/attest.yml",
+    signer: str = "meigma/template-mcp-codemode/.github/workflows/attest.yml",
     missing_checksum: str | None = None,
     checksum_override: tuple[str, str] | None = None,
     omit_artifact: tuple[str, str, str] | None = None,
@@ -140,7 +140,7 @@ def fixture(
         artifacts: list[dict[str, str]] = []
         checksum_entries: dict[str, str] = {}
         for goos, goarch in PLATFORMS:
-            binary_name = f"template-mcp_1.2.3_{goos}_{goarch}"
+            binary_name = f"template-mcp-codemode_1.2.3_{goos}_{goarch}"
             sbom_name = f"{binary_name}.sbom.json"
 
             binary_path = root / "dist" / binary_name
@@ -163,7 +163,7 @@ def fixture(
                 })
 
         if extra_binary:
-            extra_name = "template-mcp_1.2.3_freebsd_amd64"
+            extra_name = "template-mcp-codemode_1.2.3_freebsd_amd64"
             extra_path = root / "dist" / extra_name
             extra_path.write_bytes(b"extra\n")
             artifacts.append({"type": "Binary", "name": extra_name, "path": f"dist/{extra_name}"})
@@ -197,32 +197,32 @@ def write_ghd_toml(path: Path, signer: str) -> None:
 signer_workflow = "{signer}"
 
 [[packages]]
-name = "template-mcp"
-description = "Meigma Go MCP server template starter CLI."
+name = "template-mcp-codemode"
+description = "Meigma CodeMode MCP server template starter CLI."
 tag_pattern = "v${{version}}"
 
 [[packages.assets]]
 os = "darwin"
 arch = "amd64"
-pattern = "template-mcp_${{version}}_darwin_amd64"
+pattern = "template-mcp-codemode_${{version}}_darwin_amd64"
 
 [[packages.assets]]
 os = "darwin"
 arch = "arm64"
-pattern = "template-mcp_${{version}}_darwin_arm64"
+pattern = "template-mcp-codemode_${{version}}_darwin_arm64"
 
 [[packages.assets]]
 os = "linux"
 arch = "amd64"
-pattern = "template-mcp_${{version}}_linux_amd64"
+pattern = "template-mcp-codemode_${{version}}_linux_amd64"
 
 [[packages.assets]]
 os = "linux"
 arch = "arm64"
-pattern = "template-mcp_${{version}}_linux_arm64"
+pattern = "template-mcp-codemode_${{version}}_linux_arm64"
 
 [[packages.binaries]]
-path = "template-mcp"
+path = "template-mcp-codemode"
 ''',
         encoding="utf-8",
     )

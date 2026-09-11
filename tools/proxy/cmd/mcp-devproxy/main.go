@@ -10,7 +10,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/cli"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/cli"
 )
 
 func main() {

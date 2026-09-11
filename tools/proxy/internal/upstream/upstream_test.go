@@ -21,8 +21,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/meigma/template-mcp/tools/proxy/internal/reloader"
-	"github.com/meigma/template-mcp/tools/proxy/internal/upstream"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/reloader"
+	"github.com/meigma/template-mcp-codemode/tools/proxy/internal/upstream"
 )
 
 // waitTimeout bounds every asynchronous wait in this suite.

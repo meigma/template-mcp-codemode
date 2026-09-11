@@ -1,6 +1,6 @@
-module github.com/meigma/template-mcp/tools/proxy
+module github.com/meigma/template-mcp-codemode/tools/proxy
 
-go 1.26.4
+go 1.26.6
 
 require (
 	github.com/fsnotify/fsnotify v1.10.1

@@ -3,8 +3,8 @@ layer: 'application'
 stack: 'backend'
 
 project:
-  title: 'template-mcp'
-  description: 'Meigma Go MCP server template.'
+  title: 'template-mcp-codemode'
+  description: 'Meigma CodeMode MCP server template.'
   owner: 'meigma'
   maintainers:
     - 'meigma'
@@ -35,6 +35,7 @@ fileGroups:
     - 'release-please-config.json'
     - '.release-please-manifest.json'
     - '.github/workflows/**/*.yml'
+    - '.github/scripts/**/*.py'
 
 workspace:
   inheritedTasks:
@@ -70,11 +71,11 @@ tasks:
       mutex: 'golangci-lint'
 
   build:
-    command: 'go build -o bin/template-mcp ./cmd/template-mcp'
+    command: 'go build -o bin/template-mcp-codemode ./cmd/template-mcp-codemode'
     inputs:
       - '@group(goSources)'
     outputs:
-      - 'bin/template-mcp'
+      - 'bin/template-mcp-codemode'
 
   test:
     # Space-separated -coverprofile (not `=coverage.out`): under the `system`
@@ -86,12 +87,28 @@ tasks:
     options:
       cache: false
 
+  # Real MCP session against the freshly built binary: initialize, the exact tool
+  # surface, capability discovery, and a deterministic program executed in a
+  # re-executed worker process. This is the same script the release workflows run
+  # against the released binary and the published container image, so a break in
+  # the end-to-end path surfaces on every PR instead of at release time.
+  smoke:
+    command: 'uv run .github/scripts/mcp_smoke.py -- bin/template-mcp-codemode stdio'
+    deps:
+      - 'root:build'
+    inputs:
+      - '@group(goSources)'
+      - '.github/scripts/mcp_smoke.py'
+    options:
+      cache: false
+
   check:
     deps:
       - 'root:format'
       - 'root:lint'
       - 'root:build'
       - 'root:test'
+      - 'root:smoke'
       - 'docs:build'
       - 'proxy:check'
     inputs:

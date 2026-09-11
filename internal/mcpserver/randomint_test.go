@@ -7,6 +7,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/meigma/codemode/authz"
 )
 
 func TestRandomInt(t *testing.T) {
@@ -23,9 +25,9 @@ func TestRandomInt(t *testing.T) {
 		{name: "spans zero", in: randomIntInput{Min: -3, Max: 3}},
 		// Extreme ranges must not panic: a naive int64 span computation
 		// (max - min + 1) overflows here and would make crypto/rand.Int panic.
-		{name: "full int range", in: randomIntInput{Min: math.MinInt, Max: math.MaxInt}},
-		{name: "wide range from min", in: randomIntInput{Min: math.MinInt, Max: 0}},
-		{name: "wide range to max", in: randomIntInput{Min: 0, Max: math.MaxInt}},
+		{name: "full int64 range", in: randomIntInput{Min: math.MinInt64, Max: math.MaxInt64}},
+		{name: "wide range from min", in: randomIntInput{Min: math.MinInt64, Max: 0}},
+		{name: "wide range to max", in: randomIntInput{Min: 0, Max: math.MaxInt64}},
 		{name: "min greater than max", in: randomIntInput{Min: 10, Max: 1}, wantErr: true},
 	}
 
@@ -46,7 +48,7 @@ func TestRandomInt(t *testing.T) {
 func assertRandomInt(t *testing.T, in randomIntInput, wantErr bool) {
 	t.Helper()
 
-	_, out, err := randomInt(context.Background(), nil, in)
+	out, err := randomInt(context.Background(), authz.Subject{ID: "local"}, in)
 	if wantErr {
 		require.Error(t, err, "randomInt(%+v)", in)
 		return

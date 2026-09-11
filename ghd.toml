@@ -1,32 +1,32 @@
 version = 1
 
 [provenance]
-signer_workflow = "meigma/template-mcp/.github/workflows/attest.yml"
+signer_workflow = "meigma/template-mcp-codemode/.github/workflows/attest.yml"
 
 [[packages]]
-name = "template-mcp"
-description = "Meigma Go MCP server template starter CLI."
+name = "template-mcp-codemode"
+description = "Meigma CodeMode MCP server template starter CLI."
 tag_pattern = "v${version}"
 
 [[packages.assets]]
 os = "darwin"
 arch = "amd64"
-pattern = "template-mcp_${version}_darwin_amd64"
+pattern = "template-mcp-codemode_${version}_darwin_amd64"
 
 [[packages.assets]]
 os = "darwin"
 arch = "arm64"
-pattern = "template-mcp_${version}_darwin_arm64"
+pattern = "template-mcp-codemode_${version}_darwin_arm64"
 
 [[packages.assets]]
 os = "linux"
 arch = "amd64"
-pattern = "template-mcp_${version}_linux_amd64"
+pattern = "template-mcp-codemode_${version}_linux_amd64"
 
 [[packages.assets]]
 os = "linux"
 arch = "arm64"
-pattern = "template-mcp_${version}_linux_arm64"
+pattern = "template-mcp-codemode_${version}_linux_arm64"
 
 [[packages.binaries]]
-path = "template-mcp"
+path = "template-mcp-codemode"

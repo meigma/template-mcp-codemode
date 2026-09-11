@@ -66,7 +66,15 @@ func TestStdioCommandServesMCP(t *testing.T) {
 	for _, tool := range tools.Tools {
 		names = append(names, tool.Name)
 	}
-	assert.Contains(t, names, "random_int")
+	assert.ElementsMatch(t, []string{"search_api", "describe_api", "execute"}, names,
+		"stdio must expose exactly the CodeMode tool set")
+
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "execute",
+		Arguments: map[string]any{"source": "def main():\n    return random.int(min=5, max=5)\n"},
+	})
+	require.NoError(t, err, "execute over stdio")
+	require.False(t, result.IsError, "stdio execute failed, content: %+v", result.Content)
 
 	require.NoError(t, inW.Close(), "close the command's input stream")
 

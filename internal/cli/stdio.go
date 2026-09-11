@@ -12,11 +12,16 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/meigma/template-mcp/internal/mcpserver"
+	"github.com/meigma/codemode/authz"
+	hostmcp "github.com/meigma/codemode/mcpserver"
 )
 
 // stdioCommandName is the name of the stdio subcommand, also used by its tests.
 const stdioCommandName = "stdio"
+
+// stdioSubjectID is the process-owned identity for the local stdio transport.
+// Possession of the process is the authentication boundary.
+const stdioSubjectID authz.SubjectID = "local"
 
 // newStdioCommand builds the "stdio" subcommand, which serves the MCP server
 // over the stdio transport for local clients that spawn the process.
@@ -60,10 +65,10 @@ func newStdioCommand(options Options) *cobra.Command {
 // logger receives diagnostics. It must write to stderr, never out: out is the
 // JSON-RPC channel for this transport.
 func runStdio(ctx context.Context, logger *slog.Logger, build BuildInfo, in io.Reader, out io.Writer) error {
-	srv := mcpserver.New(mcpserver.Options{
-		Version: build.Version,
-		Logger:  logger,
-	})
+	srv, err := newTemplateServer(logger, build.Version, hostmcp.StaticSubject(authz.Subject{ID: stdioSubjectID}))
+	if err != nil {
+		return err
+	}
 
 	input := &eofReader{reader: in}
 	transport := &mcp.IOTransport{
@@ -73,7 +78,7 @@ func runStdio(ctx context.Context, logger *slog.Logger, build BuildInfo, in io.R
 
 	logger.InfoContext(ctx, "serving over stdio")
 
-	err := srv.Run(ctx, transport)
+	err = srv.Run(ctx, transport)
 	// Treat both normal stdio shutdowns as a clean (zero-status) exit;
 	// otherwise every routine disconnect would look like a crash.
 	//   - SIGINT/SIGTERM: the signal-derived context is cancelled and

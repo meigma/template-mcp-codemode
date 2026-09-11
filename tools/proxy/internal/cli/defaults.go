@@ -2,7 +2,7 @@ package cli
 
 // This file is the zero-config convenience layer for THIS template's layout:
 // inside the template repository a bare `mcp-devproxy` builds and serves
-// ./cmd/template-mcp. It is kept apart from the generic flag handling so
+// ./cmd/template-mcp-codemode. It is kept apart from the generic flag handling so
 // extraction to a standalone repository stays clean — delete this file and
 // its one call in resolveConfig, and nothing else changes.
 
@@ -12,7 +12,7 @@ import (
 )
 
 // defaultBuildCommand builds the template server into the cycle's artifact.
-const defaultBuildCommand = "go build -o {{artifact}} ./cmd/template-mcp"
+const defaultBuildCommand = "go build -o {{artifact}} ./cmd/template-mcp-codemode"
 
 // defaultChildTransport is the template server's stdio transport subcommand.
 const defaultChildTransport = "stdio"
