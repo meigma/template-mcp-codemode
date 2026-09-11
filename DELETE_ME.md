@@ -165,13 +165,15 @@ For a binary plus container release:
 - Update `apko.yaml`: local package, entry point, command, image annotations, and source URL.
 - Update the release, dry-run, and security-scan workflows: image name, binary validation paths, smoke commands, and summaries.
 - Update `release-please-config.json` and keep `.release-please-manifest.json` at the intended initial baseline.
-- Configure the release GitHub App credentials, protected-tag bypass, and package permissions.
+- Configure the release GitHub App credentials, protected-tag bypass, and package permissions. Release Please expects `vars.MEIGMA_RELEASE_APP_CLIENT_ID` and `secrets.MEIGMA_RELEASE_APP_PRIVATE_KEY`. Install the app on the generated repository and explicitly grant that repository access to these values; template generation does not copy credential access or app installations.
 
 If the project is binary-only, remove the melange/apko jobs, image scan, image configuration, and container required checks. If it is container-only, remove GoReleaser, `ghd.toml`, binary jobs, and binary required checks. Keep the release dry run for every release path that remains.
 
 ## Update documentation
 
 Rewrite `README.md` and `docs/docs/` for the real capabilities and retained transports. Update `docs/mkdocs.yml` (`site_url`, `repo_name`, `repo_url`, and `edit_uri`) for the generated repository. Review `CONTRIBUTING.md` and `SECURITY.md` and update the license holder if needed.
+
+If you retain the Pages workflow, enable GitHub Pages for the generated repository and select **GitHub Actions** as its build source. Template generation does not copy this repository setting.
 
 Link to the [canonical CodeMode documentation](https://meigma.github.io/codemode/) for the complete runtime, type, MCP tool, and security contracts rather than copying the upstream reference into the generated project.
 
