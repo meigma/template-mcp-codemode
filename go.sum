@@ -45,8 +45,8 @@ github.com/lestrrat-go/option/v2 v2.0.0 h1:XxrcaJESE1fokHy3FpaQ/cXW8ZsIdWcdFzzLO
 github.com/lestrrat-go/option/v2 v2.0.0/go.mod h1:oSySsmzMoR0iRzCDCaUfsCzxQHUEuhOViQObyy7S6Vg=
 github.com/meigma/codemode v0.2.0 h1:N/QYT0PdbLT3/+/seIsE+1A0kccOsmXnknDj450dsFs=
 github.com/meigma/codemode v0.2.0/go.mod h1:xZVXK9qH3apoQv3DsAldcQ0TjctDwKDN4n5dmYU0cG0=
-github.com/modelcontextprotocol/go-sdk v1.7.0 h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=
-github.com/modelcontextprotocol/go-sdk v1.7.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
+github.com/modelcontextprotocol/go-sdk v1.8.0 h1:KIvahhYqwtbeniWVPs3TcXEA7b8jEtwfBpOTAI+Urx4=
+github.com/modelcontextprotocol/go-sdk v1.8.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/open-policy-agent/opa v1.19.1 h1:aB1nOncChnTbQurjRQVJnjTJxditt8VqszlbaM3GGKU=
 github.com/open-policy-agent/opa v1.19.1/go.mod h1:pb6Y6klyf7X7X8uXNDflruA9dQC2gMqWROXI5w/kvv0=
 github.com/pelletier/go-toml/v2 v2.3.1 h1:MYEvvGnQjeNkRF1qUuGolNtNExTDwct51yp7olPtrEc=
