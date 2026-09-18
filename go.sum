@@ -43,8 +43,8 @@ github.com/lestrrat-go/jwx/v3 v3.1.1 h1:yd9AdPmZ4INnQ7k42IrzXYpnEG803+SrQ6hdMvzH
 github.com/lestrrat-go/jwx/v3 v3.1.1/go.mod h1:uw/MN2M/Xiu4FhwcIwH11Zsh9JWx9SWzgALl7/uIEkU=
 github.com/lestrrat-go/option/v2 v2.0.0 h1:XxrcaJESE1fokHy3FpaQ/cXW8ZsIdWcdFzzLOcID3Ss=
 github.com/lestrrat-go/option/v2 v2.0.0/go.mod h1:oSySsmzMoR0iRzCDCaUfsCzxQHUEuhOViQObyy7S6Vg=
-github.com/meigma/codemode v0.2.0 h1:N/QYT0PdbLT3/+/seIsE+1A0kccOsmXnknDj450dsFs=
-github.com/meigma/codemode v0.2.0/go.mod h1:xZVXK9qH3apoQv3DsAldcQ0TjctDwKDN4n5dmYU0cG0=
+github.com/meigma/codemode v0.2.1 h1:JrdLWuBB/rWEDtPy2y5Z5hXmtCSYOheGniaPlQhoSCQ=
+github.com/meigma/codemode v0.2.1/go.mod h1:xZVXK9qH3apoQv3DsAldcQ0TjctDwKDN4n5dmYU0cG0=
 github.com/modelcontextprotocol/go-sdk v1.7.0 h1:yqjY2dsbKAC0LSuWZVBMrHgiG8ukXv6NRo0JiALay44=
 github.com/modelcontextprotocol/go-sdk v1.7.0/go.mod h1:dL7u98E/zjJTGzEq+j30jQ8K2k1mb6LeAH4inEcSGts=
 github.com/open-policy-agent/opa v1.19.1 h1:aB1nOncChnTbQurjRQVJnjTJxditt8VqszlbaM3GGKU=

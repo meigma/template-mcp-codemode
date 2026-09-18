@@ -3,7 +3,7 @@ module github.com/meigma/template-mcp-codemode
 go 1.26.6
 
 require (
-	github.com/meigma/codemode v0.2.0
+	github.com/meigma/codemode v0.2.1
 	github.com/modelcontextprotocol/go-sdk v1.7.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
