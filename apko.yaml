@@ -48,4 +48,4 @@ annotations:
   org.opencontainers.image.title: template-mcp-codemode
   org.opencontainers.image.description: Meigma CodeMode MCP server template
   org.opencontainers.image.source: https://github.com/meigma/template-mcp-codemode
-  org.opencontainers.image.version: "0.0.0" # x-release-please-version
+  org.opencontainers.image.version: "0.1.0" # x-release-please-version

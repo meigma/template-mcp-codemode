@@ -7,7 +7,7 @@
 # workflow and the `image-local` mise task), so no date math runs inside the sandbox.
 package:
   name: template-mcp-codemode
-  version: "0.0.0" # x-release-please-version
+  version: "0.1.0" # x-release-please-version
   epoch: 0
   description: Meigma CodeMode MCP server template
 
