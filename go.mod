@@ -3,8 +3,8 @@ module github.com/meigma/template-mcp-codemode
 go 1.26.6
 
 require (
-	github.com/meigma/codemode v0.2.0
-	github.com/modelcontextprotocol/go-sdk v1.7.0
+	github.com/meigma/codemode v0.2.2
+	github.com/modelcontextprotocol/go-sdk v1.8.0
 	github.com/spf13/cobra v1.10.2
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.12.1
@@ -28,8 +28,8 @@ require (
 	go.starlark.net v0.0.0-20260708150628-5395d018f003 // indirect
 	go.yaml.in/yaml/v3 v3.0.5 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sync v0.22.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
 	golang.org/x/text v0.38.0 // indirect
-	golang.org/x/time v0.15.0 // indirect
+	golang.org/x/time v0.16.0 // indirect
 )
